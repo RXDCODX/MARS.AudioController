@@ -1,5 +1,4 @@
-﻿using System;
-using MARS.Server.Hubs.Interfaces;
+﻿using MARS.Server.Hubs.Interfaces;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace AudioController;
