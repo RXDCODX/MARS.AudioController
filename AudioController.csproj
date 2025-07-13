@@ -7,12 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.3" />
     <PackageReference Include="NAudio" Version="2.2.1" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\MARS.Server\MARS.Server.csproj" />
   </ItemGroup>
 
 </Project>

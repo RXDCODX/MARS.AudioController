@@ -3,7 +3,7 @@ using NAudio.CoreAudioApi;
 
 namespace AudioController;
 
-public class SoundBarService
+public class AudioControllerService
 {
     private readonly List<AudioSessionControl> _mutedBag = [];
     private readonly Lock _locker = new();

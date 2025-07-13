@@ -1,27 +1,15 @@
-﻿namespace AudioController;
+﻿using AudioController;
 
-public class Program
-{
-    public static void Main(string[] args)
-    {
-        var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
 
-        builder.Services.AddSingleton<SoundBarService>();
-        builder.Services.AddSingleton<SignalRClient>();
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<SignalRClient>());
-        builder.Services.AddSignalR();
-        builder.Logging.AddConsole();
+builder.Services.AddSingleton<AudioControllerService>();
+builder.Services.AddControllers();
+builder.Logging.AddConsole();
 
-        var app = builder.Build();
+var app = builder.Build();
 
-        app.Map(
-            "/*",
-            (HttpContext context) =>
-            {
-                context.Response.StatusCode = 200;
-            }
-        );
+app.MapControllers();
 
-        app.Run();
-    }
-}
+app.MapGet("/", () => "Audio Controller REST Server is running!");
+
+app.Run();
