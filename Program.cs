@@ -1,15 +1,21 @@
-﻿using AudioController;
+﻿namespace AudioController;
 
-var builder = WebApplication.CreateBuilder(args);
+internal class Program
+{
+    public static void Main(string[] args)
+    {
+        var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSingleton<AudioControllerService>();
-builder.Services.AddControllers();
-builder.Logging.AddConsole();
+        builder.Services.AddSingleton<AudioControllerService>();
+        builder.Services.AddControllers();
+        builder.Logging.AddConsole();
 
-var app = builder.Build();
+        var app = builder.Build();
 
-app.MapControllers();
+        app.MapControllers();
 
-app.MapGet("/", () => "Audio Controller REST Server is running!");
+        app.MapGet("/", () => "Audio Controller REST Server is running!");
 
-app.Run();
+        app.Run();
+    }
+}

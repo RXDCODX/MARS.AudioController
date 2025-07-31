@@ -6,47 +6,41 @@ namespace AudioController;
 public class AudioControllerService
 {
     private readonly List<AudioSessionControl> _mutedBag = [];
-    private readonly Lock _locker = new();
+    private readonly SemaphoreSlim semaphoreSlim = new(1);
 
-    public Task MuteAll(params string[] args)
+    public async Task MuteAll(params string[] args)
     {
-        lock (_locker)
+        await semaphoreSlim.WaitAsync();
+        var deviceEnumerator = new MMDeviceEnumerator();
+        var defaultDevice = deviceEnumerator.GetDefaultAudioEndpoint(
+            DataFlow.Render,
+            Role.Multimedia
+        );
+
+        // Добавьте эту проверку
+        if (defaultDevice.AudioSessionManager == null)
         {
-            var deviceEnumerator = new MMDeviceEnumerator();
-            var defaultDevice = deviceEnumerator.GetDefaultAudioEndpoint(
-                DataFlow.Render,
-                Role.Multimedia
-            );
-
-            // Добавьте эту проверку
-            if (defaultDevice.AudioSessionManager == null)
-            {
-                throw new InvalidOperationException("Cannot access audio session manager");
-            }
-
-            for (var index = 0; index < defaultDevice.AudioSessionManager.Sessions.Count; index++)
-            {
-                var session = defaultDevice.AudioSessionManager.Sessions[index];
-                try
-                {
-                    var processName = GetProcessName(session);
-                    if (args.All(e => !processName.Contains(e, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        lock (_locker)
-                        {
-                            session.SimpleAudioVolume.Mute = true;
-                            _mutedBag.Add(session);
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    // ignored
-                }
-            }
-
-            return Task.CompletedTask;
+            throw new InvalidOperationException("Cannot access audio session manager");
         }
+
+        for (var index = 0; index < defaultDevice.AudioSessionManager.Sessions.Count; index++)
+        {
+            var session = defaultDevice.AudioSessionManager.Sessions[index];
+            try
+            {
+                var processName = GetProcessName(session);
+                if (args.All(e => !processName.Contains(e, StringComparison.OrdinalIgnoreCase)))
+                {
+                    session.SimpleAudioVolume.Mute = true;
+                    _mutedBag.Add(session);
+                }
+            }
+            catch (Exception)
+            {
+                // ignored
+            }
+        }
+        semaphoreSlim.Release();
     }
 
     private static string GetProcessName(AudioSessionControl session)
@@ -63,9 +57,9 @@ public class AudioControllerService
         }
     }
 
-    public Task UnMuteAll()
+    public async Task UnMuteAll()
     {
-        lock (_locker)
+        await semaphoreSlim.WaitAsync();
         {
             foreach (var control in _mutedBag.ToList())
             {
@@ -74,17 +68,14 @@ public class AudioControllerService
             }
         }
 
-        return Task.CompletedTask;
+        semaphoreSlim.Release();
     }
 
     public string GetBagCount()
     {
-        lock (_locker)
-        {
-            return string.Join(
-                Environment.NewLine,
-                _mutedBag.ToArray().Select(e => $"({e.GetProcessID}) {e.DisplayName}")
-            );
-        }
+        return string.Join(
+            Environment.NewLine,
+            _mutedBag.ToArray().Select(e => $"({e.GetProcessID}) {e.DisplayName}")
+        );
     }
 }
