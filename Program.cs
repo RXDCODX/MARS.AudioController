@@ -7,6 +7,7 @@ internal class Program
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddSingleton<AudioControllerService>();
+        builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
         builder.Services.AddControllers();
         builder.Logging.AddConsole();
 
