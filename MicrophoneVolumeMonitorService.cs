@@ -1,6 +1,4 @@
-﻿using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using NAudio.CoreAudioApi;
+﻿using NAudio.CoreAudioApi;
 
 namespace AudioController;
 
