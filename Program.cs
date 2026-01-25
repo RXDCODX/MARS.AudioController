@@ -1,5 +1,7 @@
 ﻿namespace AudioController;
 
+using AudioController.Services;
+
 internal class Program
 {
     public static void Main(string[] args)
@@ -8,6 +10,9 @@ internal class Program
 
         builder.Services.AddSingleton<AudioControllerService>();
         builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
+
+        // Register audio playback queue service
+        builder.Services.AddHttpClient<IAudioPlaybackQueueService, AudioPlaybackQueueService>();
         builder.Services.AddControllers();
         builder.Logging.AddConsole();
 

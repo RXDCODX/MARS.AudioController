@@ -1,6 +1,6 @@
 ﻿using NAudio.CoreAudioApi;
 
-namespace AudioController;
+namespace AudioController.Services;
 
 public class MicrophoneVolumeMonitorService(ILogger<MicrophoneVolumeMonitorService> logger)
     : BackgroundService

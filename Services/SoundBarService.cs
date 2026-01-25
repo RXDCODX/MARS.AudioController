@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics;
 using NAudio.CoreAudioApi;
 
-namespace AudioController;
+namespace AudioController.Services;
 
 public class AudioControllerService
 {
