@@ -141,4 +141,47 @@ public class AudioPlaybackController(IAudioPlaybackQueueService audioPlaybackSer
             return BadRequest(new { success = false, message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Get current volume (0-100)
+    /// </summary>
+    /// <returns>Current volume level</returns>
+    [HttpGet("volume")]
+    public IActionResult GetVolume()
+    {
+        try
+        {
+            var volume = audioPlaybackService.GetVolume();
+            return Ok(new { success = true, volume = volume });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Set volume (0-100)
+    /// </summary>
+    /// <param name="volume">Volume level 0-100</param>
+    /// <returns>Success or error message</returns>
+    [HttpPost("volume")]
+    public IActionResult SetVolume([FromQuery] int volume)
+    {
+        try
+        {
+            // Validate volume range
+            if (volume < 0 || volume > 100)
+            {
+                return BadRequest(new { success = false, message = "Volume must be between 0 and 100" });
+            }
+
+            audioPlaybackService.SetVolume(volume);
+            return Ok(new { success = true, message = $"Volume set to {volume}%", volume = volume });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
 }

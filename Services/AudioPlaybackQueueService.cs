@@ -54,6 +54,16 @@ public interface IAudioPlaybackQueueService
     /// Gets queue items
     /// </summary>
     List<AudioQueueItem> GetQueueItems();
+
+    /// <summary>
+    /// Gets current volume (0-100)
+    /// </summary>
+    int GetVolume();
+
+    /// <summary>
+    /// Sets volume (0-100)
+    /// </summary>
+    void SetVolume(int volume);
 }
 
 public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDisposable
@@ -71,6 +81,7 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
 
     private bool _isPaused;
     private bool _isDisposed;
+    private int _volume = 100; // Default volume 100%
 
     public AudioPlaybackQueueService(
         ILogger<AudioPlaybackQueueService> logger,
@@ -244,6 +255,28 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
         }
 
         return items;
+    }
+
+    public int GetVolume()
+    {
+        return _volume;
+    }
+
+    public void SetVolume(int volume)
+    {
+        // Clamp volume between 0 and 100
+        _volume = Math.Max(0, Math.Min(100, volume));
+
+        // Apply volume to current playback if active
+        if (_wavePlayer != null && _audioFileReader != null)
+        {
+            _audioFileReader.Volume = _volume / 100f; // Convert to 0-1 range
+            _logger.LogInformation($"Volume set to {_volume}%");
+        }
+        else
+        {
+            _logger.LogInformation($"Volume set to {_volume}% (will apply to next playback)");
+        }
     }
 
     private void InitializeAudioPlayer()
