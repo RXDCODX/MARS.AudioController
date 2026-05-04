@@ -116,7 +116,9 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
             var isCurrentlyPlaying = _wavePlayer?.PlaybackState == PlaybackState.Playing;
 
             _logger.LogInformation(
-                $"Audio queued: {request.DisplayName ?? request.AudioUrl} at position {queuePosition}"
+                "Audio queued: {RequestDisplayName} at position {QueuePosition}",
+                request.DisplayName ?? request.AudioUrl,
+                queuePosition
             );
 
             // Start playback if nothing is playing
@@ -270,11 +272,14 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
         if (_wavePlayer != null && _audioFileReader != null)
         {
             _audioFileReader.Volume = _volume / 100f; // Convert to 0-1 range
-            _logger.LogInformation($"Volume set to {_volume}%");
+            _logger.LogInformation("Volume set to {Volume}%", _volume);
         }
         else
         {
-            _logger.LogInformation($"Volume set to {_volume}% (will apply to next playback)");
+            _logger.LogInformation(
+                "Volume set to {Volume}% (will apply to next playback)",
+                _volume
+            );
         }
     }
 
@@ -301,7 +306,8 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
             {
                 var queueItem = _queue.Dequeue();
                 _logger.LogInformation(
-                    $"Starting playback: {queueItem.DisplayName ?? queueItem.AudioUrl}"
+                    "Starting playback: {QueueItemDisplayName}",
+                    queueItem.DisplayName ?? queueItem.AudioUrl
                 );
 
                 await PlayAudioAsync(queueItem);
