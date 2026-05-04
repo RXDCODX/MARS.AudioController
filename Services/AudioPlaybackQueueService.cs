@@ -1,5 +1,5 @@
-using NAudio.Wave;
 using AudioController.Models;
+using NAudio.Wave;
 
 namespace AudioController.Services;
 
@@ -77,7 +77,6 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
     private AudioFileReader? _audioFileReader;
     private string? _currentAudioPath;
     private CancellationTokenSource? _playCancellationTokenSource;
-    private Task? _playbackTask;
 
     private bool _isPaused;
     private bool _isDisposed;
