@@ -13,6 +13,7 @@ from app.models import AudioPlaybackRequest, MuteRequest
 from app.monitor_service import MicrophoneVolumeMonitorService
 from app.playback_service import AudioPlaybackQueueService
 from app.soundbar_service import SoundBarService
+from app.voice_recognition_app_service import VoiceRecognitionAppService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,12 +60,24 @@ async def lifespan(app: FastAPI):
     app.state.soundbar_service = SoundBarService()
     app.state.monitor_service = MicrophoneVolumeMonitorService(app.state.microphone_service)
 
+    # Initialize voice recognition service
+    mars_server_url = os.getenv("MARS_SERVER_URL", "http://localhost:5000").rstrip("/")
+    app.state.voice_recognition_service = VoiceRecognitionAppService(server_url=mars_server_url)
+
     await app.state.monitor_service.start()
     logger.info("Audio Controller services started")
 
     yield
 
     logger.info("Stopping Audio Controller services")
+    
+    # Stop voice recognition if active
+    if hasattr(app.state, 'voice_recognition_service'):
+        try:
+            await app.state.voice_recognition_service.stop_listening()
+        except Exception as e:
+            logger.error("Error stopping voice recognition: %s", e)
+    
     await app.state.monitor_service.stop()
     await app.state.playback_service.dispose()
     logger.info("Audio Controller services stopped")
@@ -244,6 +257,50 @@ async def get_soundbar_bag_count():
         return {"success": True, "bagCount": bag_count}
     except Exception as ex:
         raise HTTPException(status_code=400, detail={"success": False, "message": str(ex)}) from ex
+
+
+@app.post("/api/voice-recognition/start")
+async def start_voice_recognition():
+    """Start voice recognition and connect to speech server."""
+    logger.info("POST /api/voice-recognition/start")
+    try:
+        success = await app.state.voice_recognition_service.start_listening()
+        if success:
+            return {"success": True, "message": "Voice recognition started"}
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail={"success": False, "message": "Failed to start voice recognition"}
+            )
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.exception("Error starting voice recognition")
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(ex)}) from ex
+
+
+@app.post("/api/voice-recognition/stop")
+async def stop_voice_recognition():
+    """Stop voice recognition."""
+    logger.info("POST /api/voice-recognition/stop")
+    try:
+        await app.state.voice_recognition_service.stop_listening()
+        return {"success": True, "message": "Voice recognition stopped"}
+    except Exception as ex:
+        logger.exception("Error stopping voice recognition")
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(ex)}) from ex
+
+
+@app.get("/api/voice-recognition/status")
+async def get_voice_recognition_status():
+    """Get voice recognition service status."""
+    logger.info("GET /api/voice-recognition/status")
+    try:
+        status = app.state.voice_recognition_service.get_status()
+        return {"success": True, "status": status}
+    except Exception as ex:
+        logger.exception("Error getting voice recognition status")
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(ex)}) from ex
 
 
 if __name__ == "__main__":
