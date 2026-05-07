@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import logging
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 import uvicorn
@@ -49,11 +50,9 @@ def get_default_port() -> int:
 
     return DEVELOPMENT_PORT
 
-app = FastAPI(title="Audio Controller REST Server")
 
-
-@app.on_event("startup")
-async def startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     logger.info("Starting Audio Controller services")
     app.state.playback_service = AudioPlaybackQueueService()
     app.state.microphone_service = MicrophoneService()
@@ -63,13 +62,15 @@ async def startup() -> None:
     await app.state.monitor_service.start()
     logger.info("Audio Controller services started")
 
+    yield
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
     logger.info("Stopping Audio Controller services")
     await app.state.monitor_service.stop()
     await app.state.playback_service.dispose()
     logger.info("Audio Controller services stopped")
+
+
+app = FastAPI(title="Audio Controller REST Server", lifespan=lifespan)
 
 
 @app.get("/")
