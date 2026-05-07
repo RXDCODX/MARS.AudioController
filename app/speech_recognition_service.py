@@ -70,6 +70,7 @@ class SpeechRecognitionService:
         self._lock = threading.Lock()
         self._recognition_callback: Callable[[str, str], None] | None = None
         self._stream = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         
         # Initialize Silero VAD model
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -111,7 +112,7 @@ class SpeechRecognitionService:
                 # For streaming, tiny is fastest but less accurate
                 self._whisper_model = WhisperModel(
                     model_size_or_path="base",
-                    device="auto",
+                    device="cpu",
                     compute_type="int8",  # Quantized for speed
                 )
                 self._logger.info("Faster-Whisper model loaded successfully")
@@ -136,6 +137,11 @@ class SpeechRecognitionService:
         if self._is_active:
             self._logger.warning("Speech recognition already active")
             return
+
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         
         self._is_active = True
         self._audio_buffer = []
@@ -166,7 +172,7 @@ class SpeechRecognitionService:
         
         # Process any remaining audio in buffer
         if self._audio_buffer:
-            asyncio.create_task(self._process_audio_buffer())
+            self._schedule_async(self._process_audio_buffer())
         
         self._logger.info("Speech recognition stopped")
 
@@ -187,7 +193,12 @@ class SpeechRecognitionService:
                 self._audio_buffer = []
                 
                 # Non-blocking processing
-                asyncio.create_task(self._process_audio_chunk(buffer_to_process))
+                self._schedule_async(self._process_audio_chunk(buffer_to_process))
+
+    def _schedule_async(self, coroutine) -> None:
+        """Schedule async work from the audio callback thread safely."""
+        if self._loop and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(coroutine, self._loop)
 
     async def _process_audio_chunk(self, audio_data: np.ndarray) -> None:
         """
@@ -244,6 +255,8 @@ class SpeechRecognitionService:
             return confidence > self.vad_threshold
         except Exception as e:
             self._logger.warning("VAD detection failed: %s, using fallback", e)
+            if "Supported values" in str(e):
+                self._vad_model = None
             return self._energy_based_vad(audio_data)
 
     def _energy_based_vad(self, audio_data: np.ndarray) -> bool:
@@ -289,7 +302,7 @@ class SpeechRecognitionService:
             try:
                 # Use faster-whisper for low-latency recognition
                 segments, info = self._whisper_model.transcribe(
-                    (audio_tensor.cpu().numpy(), self.sample_rate),
+                    audio_tensor.cpu().numpy(),
                     language="ru" if "ru" in self.languages else "en",
                     beam_size=5,
                     best_of=1,

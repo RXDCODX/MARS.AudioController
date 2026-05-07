@@ -60,19 +60,36 @@ async def lifespan(app: FastAPI):
     app.state.soundbar_service = SoundBarService()
     app.state.monitor_service = MicrophoneVolumeMonitorService(app.state.microphone_service)
 
-    # Initialize voice recognition service
-    mars_server_url = os.getenv("MARS_SERVER_URL", "http://localhost:5000").rstrip("/")
-    app.state.voice_recognition_service = VoiceRecognitionAppService(server_url=mars_server_url)
+    # Initialize voice recognition service (can be disabled via VOICE_RECOGNITION_ENABLED)
+    vr_enabled_text = os.getenv("VOICE_RECOGNITION_ENABLED", "1")
+    vr_enabled = str(vr_enabled_text).strip().lower() in ("1", "true", "yes", "on")
+    if vr_enabled:
+        mars_server_url = os.getenv("MARS_SERVER_URL", "http://localhost:9155" if is_production_runtime() else "http://localhost:9255").rstrip("/")
+        app.state.voice_recognition_service = VoiceRecognitionAppService(server_url=mars_server_url)
+    else:
+        app.state.voice_recognition_service = None
+        logger.info("Voice recognition disabled by VOICE_RECOGNITION_ENABLED=%r", vr_enabled_text)
 
     await app.state.monitor_service.start()
+    
+    # Start voice recognition automatically if enabled
+    if getattr(app.state, 'voice_recognition_service', None) is not None:
+        listening_started = await app.state.voice_recognition_service.start_listening()
+        if listening_started:
+            logger.info("Voice recognition service started automatically")
+        else:
+            logger.warning("Voice recognition service failed to start, will retry")
+    else:
+        logger.info("Skipping automatic start: voice recognition disabled")
+    
     logger.info("Audio Controller services started")
 
     yield
 
     logger.info("Stopping Audio Controller services")
     
-    # Stop voice recognition if active
-    if hasattr(app.state, 'voice_recognition_service'):
+    # Stop voice recognition if active and enabled
+    if getattr(app.state, 'voice_recognition_service', None) is not None:
         try:
             await app.state.voice_recognition_service.stop_listening()
         except Exception as e:
@@ -264,6 +281,9 @@ async def start_voice_recognition():
     """Start voice recognition and connect to speech server."""
     logger.info("POST /api/voice-recognition/start")
     try:
+        if getattr(app.state, 'voice_recognition_service', None) is None:
+            raise HTTPException(status_code=400, detail={"success": False, "message": "Voice recognition disabled by configuration"})
+
         success = await app.state.voice_recognition_service.start_listening()
         if success:
             return {"success": True, "message": "Voice recognition started"}
@@ -284,6 +304,9 @@ async def stop_voice_recognition():
     """Stop voice recognition."""
     logger.info("POST /api/voice-recognition/stop")
     try:
+        if getattr(app.state, 'voice_recognition_service', None) is None:
+            raise HTTPException(status_code=400, detail={"success": False, "message": "Voice recognition disabled by configuration"})
+
         await app.state.voice_recognition_service.stop_listening()
         return {"success": True, "message": "Voice recognition stopped"}
     except Exception as ex:
@@ -296,6 +319,9 @@ async def get_voice_recognition_status():
     """Get voice recognition service status."""
     logger.info("GET /api/voice-recognition/status")
     try:
+        if getattr(app.state, 'voice_recognition_service', None) is None:
+            return {"success": True, "status": "disabled_by_config"}
+
         status = app.state.voice_recognition_service.get_status()
         return {"success": True, "status": status}
     except Exception as ex:

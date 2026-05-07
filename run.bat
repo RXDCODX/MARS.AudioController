@@ -2,7 +2,9 @@
 setlocal
 
 set "AUDIO_CONTROLLER_ENV=Development"
+set "MARS_SERVER_URL=http://localhost:9255"
 set "PORT=30691"
+set "VOICE_RECOGNITION_ENABLED=0
 
 if not exist .venv (
   py -3 -m venv .venv

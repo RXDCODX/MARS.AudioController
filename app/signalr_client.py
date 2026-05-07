@@ -59,54 +59,73 @@ class AudioControllerSignalRClient:
             return False
         
         try:
-            # Use HubConnectionBuilder instead of deprecated HubConnection API
+            self._logger.info("Attempting to connect to SignalR hub at %s", self.hub_url)
+            
+            # Build a fresh connection for this attempt.
             self._connection = (
                 HubConnectionBuilder()
                 .with_url(self.hub_url)
-                .with_automatic_reconnect({
-                    "type": "exponential",
-                    "keep_alive_interval": 10,
-                    "max_attempts": self._max_reconnect_attempts,
-                    "max_delay": 60,
-                })
+                .configure_logging(logging.ERROR)
                 .build()
             )
             
             # Set up event handlers
             self._connection.on_open(self._on_connected)
             self._connection.on_close(self._on_disconnected)
-            self._connection.on("error", self._on_error)
             
-            # Set up server method handlers (if needed)
+            # Set up server-side method handlers
             self._connection.on("VoiceRecognitionStarted", self._on_recognition_started)
             self._connection.on("VoiceRecognitionStopped", self._on_recognition_stopped)
             
             # Start connection with timeout
             try:
-                await asyncio.wait_for(self._connection.start(), timeout=10.0)
-                self._is_connected = True
-                self._reconnect_attempts = 0
+                self._logger.debug("Starting SignalR connection...")
+                started = await asyncio.wait_for(asyncio.to_thread(self._connection.start), timeout=15.0)
+                if started:
+                    self._is_connected = True
+                    self._reconnect_attempts = 0
+
+                    try:
+                        await asyncio.to_thread(self._connection.invoke, "RegisterAsAudioSource", [])
+                    except Exception as e:
+                        self._logger.warning("Could not invoke RegisterAsAudioSource: %s", e)
                 
-                self._logger.info("Connected to SignalR hub at %s", self.hub_url)
-                return True
+                    self._logger.info("✓ Successfully connected to SignalR hub at %s", self.hub_url)
+                    return True
+                
+                self._logger.error("❌ SignalR hub connection start returned failure")
+                self._is_connected = False
+                return False
+                
             except asyncio.TimeoutError:
-                self._logger.error("Connection timeout to SignalR hub")
+                self._logger.error("❌ Connection timeout to SignalR hub (timeout: 15s) - MARS.Server may be unavailable")
+                self._is_connected = False
+                return False
+            except OSError as e:
+                self._logger.error("❌ Connection refused by SignalR hub: %s (MARS.Server may be offline)", e)
+                self._is_connected = False
                 return False
             
         except Exception as e:
-            self._logger.error("Failed to connect to SignalR hub: %s", e)
+            self._logger.error("❌ Unexpected error connecting to SignalR hub: %s", e)
+            import traceback
+            self._logger.debug("Traceback: %s", traceback.format_exc())
             self._is_connected = False
             return False
 
     async def disconnect(self) -> None:
-        """Disconnect from SignalR hub."""
-        if self._connection:
-            try:
-                await self._connection.stop()
-                self._is_connected = False
-                self._logger.info("Disconnected from SignalR hub")
-            except Exception as e:
-                self._logger.error("Error during disconnect: %s", e)
+        """Disconnect from SignalR hub gracefully."""
+        if not self._connection:
+            return
+            
+        try:
+            self._logger.info("Disconnecting from SignalR hub...")
+            await asyncio.to_thread(self._connection.stop)
+            self._is_connected = False
+            self._logger.info("✓ Disconnected from SignalR hub")
+        except Exception as e:
+            self._logger.error("Error during disconnect: %s", e)
+            self._is_connected = False
 
     async def send_recognized_text(
         self,
@@ -128,7 +147,7 @@ class AudioControllerSignalRClient:
             True if sent successfully, False otherwise
         """
         if not self._is_connected or not self._connection:
-            self._logger.warning("Not connected to hub, cannot send message")
+            self._logger.warning("Not connected to hub, cannot send message: %r", text[:50])
             return False
         
         try:
@@ -141,11 +160,11 @@ class AudioControllerSignalRClient:
             }
             
             # Send to server method: ReceiveVoiceMessage
-            await self._connection.invoke("ReceiveVoiceMessage", message)
+            await asyncio.to_thread(self._connection.invoke, "ReceiveVoiceMessage", [message])
             
             self._logger.debug(
-                "Sent voice message: text=%r, language=%s, confidence=%.2f",
-                text,
+                "✓ Sent voice message: text=%r, language=%s, confidence=%.2f",
+                text[:50],
                 language,
                 confidence,
             )
@@ -169,7 +188,7 @@ class AudioControllerSignalRClient:
             return False
         
         try:
-            await self._connection.invoke("VoiceActivityDetected", is_active)
+            await asyncio.to_thread(self._connection.invoke, "VoiceActivityDetected", [is_active])
             return True
         except Exception as e:
             self._logger.error("Failed to send VAD event: %s", e)
@@ -191,22 +210,22 @@ class AudioControllerSignalRClient:
     def _on_connected(self) -> None:
         """Called when connected to hub."""
         self._is_connected = True
-        self._logger.info("SignalR connection established")
+        self._logger.info("✓ SignalR connection established with hub")
 
     def _on_disconnected(self) -> None:
         """Called when disconnected from hub."""
         self._is_connected = False
-        self._logger.warning("SignalR connection lost")
+        self._logger.warning("⚠️  SignalR connection lost - reconnection will be attempted")
 
     def _on_error(self, error: Exception) -> None:
         """Called when connection error occurs."""
-        self._logger.error("SignalR connection error: %s", error)
+        self._logger.error("❌ SignalR error: %s", error)
         self._reconnect_attempts += 1
 
     def _on_recognition_started(self) -> None:
         """Called when server starts recognition session."""
-        self._logger.info("Server started voice recognition session")
+        self._logger.info("🎤 Server started voice recognition session")
 
     def _on_recognition_stopped(self) -> None:
         """Called when server stops recognition session."""
-        self._logger.info("Server stopped voice recognition session")
+        self._logger.info("🛑 Server stopped voice recognition session")
