@@ -1,86 +1,61 @@
-# Audio Controller
+# Audio Controller (Python)
 
-Сервис для управления аудио в системе MARS.
+Полный перенос сервиса на Python с сохранением API-эндпоинтов.
 
-## Функциональность
+## Технологии
 
-### Мониторинг громкости микрофона
+- FastAPI
+- Uvicorn
+- pycaw/comtypes (Windows Core Audio)
+- python-vlc (воспроизведение аудио)
+- httpx (скачивание MP3)
 
-- **Автоматическая проверка**: Каждые 5 минут проверяется громкость микрофона
-- **Логирование**: Все проверки записываются в лог с уровнем информации
-- **Предупреждения**: Если громкость не на максимуме, выводится предупреждение
+## Что реализовано
 
-### API Endpoints
-
-#### GET `/api/microphone/volume`
-
-Получить текущую громкость микрофона
-
-**Ответ:**
-
-```json
-{
-  "volume": 0.8,
-  "volumePercent": "80%",
-  "isMuted": false,
-  "isAtMaximum": false,
-  "deviceName": "Microphone (Realtek Audio)"
-}
-```
-
-#### POST `/api/microphone/volume/max`
-
-Установить громкость микрофона на максимум
-
-**Ответ:**
-
-```json
-{
-  "previousVolume": 0.8,
-  "previousVolumePercent": "80%",
-  "currentVolume": 1.0,
-  "currentVolumePercent": "100%",
-  "message": "Microphone volume set to maximum"
-}
-```
-
-#### POST `/api/microphone/volume/{volume}`
-
-Установить громкость микрофона на указанное значение (0.0 - 1.0)
-
-**Пример:** `POST /api/microphone/volume/0.75`
-
-**Ответ:**
-
-```json
-{
-  "previousVolume": 1.0,
-  "previousVolumePercent": "100%",
-  "currentVolume": 0.75,
-  "currentVolumePercent": "75%",
-  "message": "Microphone volume set to 75%"
-}
-```
+- Мониторинг громкости микрофона каждые 5 минут (автоподнятие до 100%)
+- Очередь воспроизведения MP3 по URL с приоритетами
+- Управление воспроизведением: queue/status/skip/stop/pause/resume/volume
+- Mute/Unmute аудиосессий процессов
 
 ## Запуск
 
-```bash
-dotnet run
+```bat
+run.bat
 ```
 
-Сервис автоматически начнет мониторинг громкости микрофона каждые 5 минут.
+`run.bat` запускает сервер на `http://localhost:30691`.
+Собранный `AudioControllerPy.exe` по умолчанию поднимается на `http://localhost:30695`.
 
-## Логи
+Или вручную:
 
-Сервис выводит логи в консоль:
+```bash
+py -3 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 30691
+```
 
-- Информация о запуске/остановке
-- Текущая громкость микрофона
-- Предупреждения, если громкость не на максимуме
-- Ошибки при работе с аудио устройствами
+## Эндпоинты
 
-## Требования
+- `GET /`
+- `POST /api/audioplayback/queue`
+- `GET /api/audioplayback/status`
+- `POST /api/audioplayback/skip`
+- `POST /api/audioplayback/stop`
+- `POST /api/audioplayback/pause`
+- `POST /api/audioplayback/resume`
+- `GET /api/audioplayback/queue`
+- `GET /api/audioplayback/volume`
+- `POST /api/audioplayback/volume?volume=80`
+- `GET /api/microphone/volume`
+- `POST /api/microphone/volume/max`
+- `POST /api/microphone/volume/{volume}`
+- `POST /api/soundbar/mute`
+- `POST /api/soundbar/unmute`
+- `GET /api/soundbar/bagcount`
 
-- .NET 9.0
-- NAudio 2.2.1
-- Windows (для работы с Core Audio API)
+## Важные требования
+
+- Windows 10/11
+- Установленный VLC media player (для `python-vlc`)
+- Python 3.11+
