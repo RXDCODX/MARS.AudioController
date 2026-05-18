@@ -1,6 +1,7 @@
-﻿namespace AudioController;
+using MARS.AudioController.Services;
+using MARS.AudioController.Services.TTS;
 
-using AudioController.Services;
+namespace MARS.AudioController;
 
 internal class Program
 {
@@ -9,6 +10,7 @@ internal class Program
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddSingleton<AudioControllerService>();
+        builder.Services.AddSingleton<TtsPlaybackService>();
         builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
 
         // Register audio playback queue service

@@ -1,15 +1,16 @@
+using MARS.AudioController.Models;
+using MARS.AudioController.Services;
 using Microsoft.AspNetCore.Mvc;
-using AudioController.Models;
-using AudioController.Services;
 
-namespace AudioController.Controllers;
+namespace MARS.AudioController.Controllers;
 
 /// <summary>
 /// Controller for audio playback queue management
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class AudioPlaybackController(IAudioPlaybackQueueService audioPlaybackService) : ControllerBase
+public class AudioPlaybackController(IAudioPlaybackQueueService audioPlaybackService)
+    : ControllerBase
 {
     /// <summary>
     /// Queue audio for playback
@@ -26,11 +27,7 @@ public class AudioPlaybackController(IAudioPlaybackQueueService audioPlaybackSer
         }
         catch (Exception ex)
         {
-            return BadRequest(new AudioPlaybackResponse
-            {
-                Success = false,
-                Message = ex.Message
-            });
+            return BadRequest(new AudioPlaybackResponse { Success = false, Message = ex.Message });
         }
     }
 
@@ -134,7 +131,14 @@ public class AudioPlaybackController(IAudioPlaybackQueueService audioPlaybackSer
         try
         {
             var items = audioPlaybackService.GetQueueItems();
-            return Ok(new { success = true, queueItems = items, count = items.Count });
+            return Ok(
+                new
+                {
+                    success = true,
+                    queueItems = items,
+                    count = items.Count,
+                }
+            );
         }
         catch (Exception ex)
         {
@@ -173,11 +177,20 @@ public class AudioPlaybackController(IAudioPlaybackQueueService audioPlaybackSer
             // Validate volume range
             if (volume < 0 || volume > 100)
             {
-                return BadRequest(new { success = false, message = "Volume must be between 0 and 100" });
+                return BadRequest(
+                    new { success = false, message = "Volume must be between 0 and 100" }
+                );
             }
 
             audioPlaybackService.SetVolume(volume);
-            return Ok(new { success = true, message = $"Volume set to {volume}%", volume = volume });
+            return Ok(
+                new
+                {
+                    success = true,
+                    message = $"Volume set to {volume}%",
+                    volume = volume,
+                }
+            );
         }
         catch (Exception ex)
         {

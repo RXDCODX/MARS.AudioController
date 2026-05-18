@@ -1,7 +1,7 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using NAudio.CoreAudioApi;
 
-namespace AudioController.Controllers;
+namespace MARS.AudioController.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]

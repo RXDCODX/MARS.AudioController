@@ -1,4 +1,4 @@
-namespace AudioController.Models;
+namespace MARS.AudioController.Models;
 
 /// <summary>
 /// Request to play audio from URL

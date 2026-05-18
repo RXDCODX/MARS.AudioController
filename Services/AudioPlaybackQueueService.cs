@@ -1,7 +1,7 @@
-using AudioController.Models;
+using MARS.AudioController.Models;
 using NAudio.Wave;
 
-namespace AudioController.Services;
+namespace MARS.AudioController.Services;
 
 /// <summary>
 /// Audio playback queue item

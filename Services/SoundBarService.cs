@@ -1,16 +1,16 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using NAudio.CoreAudioApi;
 
-namespace AudioController.Services;
+namespace MARS.AudioController.Services;
 
 public class AudioControllerService
 {
     private readonly List<AudioSessionControl> _mutedBag = [];
-    private readonly SemaphoreSlim semaphoreSlim = new(1);
+    private readonly SemaphoreSlim _semaphoreSlim = new(1);
 
     public async Task MuteAll(params string[] args)
     {
-        await semaphoreSlim.WaitAsync();
+        await _semaphoreSlim.WaitAsync();
         var deviceEnumerator = new MMDeviceEnumerator();
         var defaultDevice = deviceEnumerator.GetDefaultAudioEndpoint(
             DataFlow.Render,
@@ -40,7 +40,7 @@ public class AudioControllerService
                 // ignored
             }
         }
-        semaphoreSlim.Release();
+        _semaphoreSlim.Release();
     }
 
     private static string GetProcessName(AudioSessionControl session)
@@ -59,7 +59,7 @@ public class AudioControllerService
 
     public async Task UnMuteAll()
     {
-        await semaphoreSlim.WaitAsync();
+        await _semaphoreSlim.WaitAsync();
         {
             foreach (var control in _mutedBag.ToList())
             {
@@ -68,7 +68,7 @@ public class AudioControllerService
             }
         }
 
-        semaphoreSlim.Release();
+        _semaphoreSlim.Release();
     }
 
     public string GetBagCount()

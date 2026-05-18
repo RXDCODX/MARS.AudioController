@@ -1,6 +1,6 @@
-using AudioController.Services;
+using MARS.AudioController.Services;
 
-namespace AudioController;
+namespace MARS.AudioController;
 
 /// <summary>
 /// Extension methods for registering audio playback services
@@ -26,9 +26,11 @@ public static class AudioPlaybackServiceCollectionExtensions
     /// <returns>Service collection for chaining</returns>
     public static IServiceCollection AddAudioPlaybackQueue(
         this IServiceCollection services,
-        Action<HttpClient> configureClient)
+        Action<HttpClient> configureClient
+    )
     {
-        services.AddHttpClient<IAudioPlaybackQueueService, AudioPlaybackQueueService>()
+        services
+            .AddHttpClient<IAudioPlaybackQueueService, AudioPlaybackQueueService>()
             .ConfigureHttpClient(configureClient);
         return services;
     }
