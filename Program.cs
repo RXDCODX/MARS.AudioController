@@ -11,6 +11,10 @@ internal class Program
 
         builder.Services.AddSingleton<AudioControllerService>();
         builder.Services.AddSingleton<TtsPlaybackService>();
+        builder.Services.AddSingleton<SyntheziaQueueManager>();
+        builder.Services.AddSingleton<ISyntheziaQueueManager>(sp => sp.GetRequiredService<SyntheziaQueueManager>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<SyntheziaQueueManager>());
+        builder.Services.AddHostedService<TtsHubClientHostedService>();
         builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
 
         // Register audio playback queue service
