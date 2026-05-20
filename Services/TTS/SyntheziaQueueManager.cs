@@ -116,10 +116,11 @@ public class SyntheziaQueueManager(
                     }
 
                     // Play the actual message
+                    var speechText = BuildSpeechText(queued.User, queued.Message);
                     await ttsPlaybackService.PlayAsync(
                         new TtsPlaybackRequest
                         {
-                            Text = queued.Message,
+                            Text = speechText,
                             VoiceStylePath = voiceStyle,
                             Volume = playbackState.Volume,
                             Language = "na",
@@ -180,5 +181,19 @@ public class SyntheziaQueueManager(
 
         // Fallback: return the filename/code as-is
         return file;
+    }
+
+    private static string BuildSpeechText(TwitchUser user, string message)
+    {
+        var userName = string.IsNullOrWhiteSpace(user.DisplayName)
+            ? user.UserLogin
+            : user.DisplayName;
+
+        if (string.IsNullOrWhiteSpace(userName))
+        {
+            return message;
+        }
+
+        return $"{userName} пишет: {message}";
     }
 }
