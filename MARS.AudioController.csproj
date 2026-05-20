@@ -10,6 +10,7 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
     <PackageReference Include="NAudio" />
+    <PackageReference Include="System.Speech" />
   </ItemGroup>
 
   <ItemGroup>

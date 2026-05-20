@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO;
+using System.Runtime.Versioning;
 using MARS.AudioController.Models;
 using MARS.Server.Hubs.Models.VoiceRecognition;
 using MARS.Server.Services.Twitch.Entitys;
@@ -13,8 +14,10 @@ public interface ISyntheziaQueueManager
     Task ApplyStateAsync(TtsState state);
 }
 
+[SupportedOSPlatform("windows")]
 public class SyntheziaQueueManager(
     TtsPlaybackService ttsPlaybackService,
+    SystemSpeechTtsPlaybackService systemSpeechTtsPlaybackService,
     TtsPlaybackStateService playbackState,
     IConfiguration configuration,
     ILogger<SyntheziaQueueManager> logger
@@ -22,7 +25,8 @@ public class SyntheziaQueueManager(
 {
     private readonly ConcurrentQueue<(TwitchUser User, string Message)> _queue = new();
     private readonly SemaphoreSlim _signal = new(0);
-    private readonly Dictionary<string, string> _linkedVoices = new(
+    private readonly object _voicesGate = new();
+    private readonly Dictionary<string, VoiceAssignment> _linkedVoices = new(
         StringComparer.OrdinalIgnoreCase
     );
     private readonly Dictionary<string, string> _voiceDisplayNames = new(
@@ -42,6 +46,8 @@ public class SyntheziaQueueManager(
     };
     private readonly List<string> _availableVoiceStyles =
         configuration.GetSection("Tts:VoiceStyles").Get<List<string>>() ?? [];
+    private readonly IReadOnlyList<string> _availableSystemVoices =
+        systemSpeechTtsPlaybackService.GetInstalledVoices();
 
     public Task EnqueueAsync(TwitchUser user, string message)
     {
@@ -96,37 +102,19 @@ public class SyntheziaQueueManager(
             {
                 try
                 {
-                    var (voiceStyle, isNew) = ResolveOrAssignVoice(queued.User.TwitchId);
+                    var (assignment, isNew) = ResolveOrAssignVoice(queued.User.TwitchId);
 
                     if (isNew)
                     {
-                        var displayName = GetVoiceDisplayName(voiceStyle);
+                        var displayName = GetVoiceDisplayName(assignment);
                         var greeting =
                             $"Привет, {queued.User.DisplayName}! Для тебя был выбран голос {displayName}";
-                        await ttsPlaybackService.PlayAsync(
-                            new TtsPlaybackRequest
-                            {
-                                Text = greeting,
-                                VoiceStylePath = voiceStyle,
-                                Volume = playbackState.Volume,
-                                Language = "na",
-                            },
-                            stoppingToken
-                        );
+                        await PlayByAssignmentAsync(assignment, greeting, stoppingToken);
                     }
 
                     // Play the actual message
                     var speechText = BuildSpeechText(queued.User, queued.Message);
-                    await ttsPlaybackService.PlayAsync(
-                        new TtsPlaybackRequest
-                        {
-                            Text = speechText,
-                            VoiceStylePath = voiceStyle,
-                            Volume = playbackState.Volume,
-                            Language = "na",
-                        },
-                        stoppingToken
-                    );
+                    await PlayByAssignmentAsync(assignment, speechText, stoppingToken);
                 }
                 catch (Exception ex)
                 {
@@ -140,46 +128,105 @@ public class SyntheziaQueueManager(
         }
     }
 
-    private (string VoiceStyle, bool IsNew) ResolveOrAssignVoice(string userKey)
+    private (VoiceAssignment Assignment, bool IsNew) ResolveOrAssignVoice(string userKey)
     {
-        if (_linkedVoices.TryGetValue(userKey, out var existing))
+        lock (_voicesGate)
         {
-            return (existing, false);
-        }
+            if (_linkedVoices.TryGetValue(userKey, out var existing))
+            {
+                return (existing, false);
+            }
 
-        if (_availableVoiceStyles.Count == 0)
-        {
-            var fallback = "assets/voice_styles/M1.json";
-            _linkedVoices[userKey] = fallback;
-            return (fallback, true);
-        }
+            var availableBindings = BuildAvailableBindings();
+            var fallback = new VoiceAssignment(VoiceEngine.Onnx, "assets/voice_styles/M1.json");
 
-        var index = Random.Shared.Next(_availableVoiceStyles.Count);
-        var choice = _availableVoiceStyles[index];
-        _linkedVoices[userKey] = choice;
-        return (choice, true);
+            var choice = availableBindings.Count == 0
+                ? fallback
+                : availableBindings[Random.Shared.Next(availableBindings.Count)];
+
+            _linkedVoices[userKey] = choice;
+            return (choice, true);
+        }
     }
 
-    private string GetVoiceDisplayName(string voiceStylePath)
+    private IReadOnlyList<VoiceAssignment> BuildAvailableBindings()
     {
-        if (string.IsNullOrWhiteSpace(voiceStylePath))
+        var result = new List<VoiceAssignment>();
+
+        if (_availableVoiceStyles.Count > 0)
         {
-            return voiceStylePath;
+            result.AddRange(
+                _availableVoiceStyles
+                    .Where(style => !string.IsNullOrWhiteSpace(style))
+                    .Select(style => new VoiceAssignment(VoiceEngine.Onnx, style))
+            );
         }
 
-        var file = Path.GetFileNameWithoutExtension(voiceStylePath);
+        if (_availableSystemVoices.Count > 0)
+        {
+            result.AddRange(
+                _availableSystemVoices
+                    .Where(voice => !string.IsNullOrWhiteSpace(voice))
+                    .Select(voice => new VoiceAssignment(VoiceEngine.WinApi, voice))
+            );
+        }
+
+        return result;
+    }
+
+    private async Task PlayByAssignmentAsync(
+        VoiceAssignment assignment,
+        string text,
+        CancellationToken cancellationToken
+    )
+    {
+        if (assignment.Engine == VoiceEngine.WinApi)
+        {
+            await systemSpeechTtsPlaybackService.PlayAsync(
+                text,
+                assignment.VoiceId,
+                playbackState.Volume,
+                cancellationToken
+            );
+        }
+        else
+        {
+            await ttsPlaybackService.PlayAsync(
+                new TtsPlaybackRequest
+                {
+                    Text = text,
+                    VoiceStylePath = assignment.VoiceId,
+                    Volume = playbackState.Volume,
+                    Language = "na",
+                },
+                cancellationToken
+            );
+        }
+    }
+
+    private string GetVoiceDisplayName(VoiceAssignment assignment)
+    {
+        if (string.IsNullOrWhiteSpace(assignment.VoiceId))
+        {
+            return assignment.VoiceId;
+        }
+
+        if (assignment.Engine == VoiceEngine.WinApi)
+        {
+            return assignment.VoiceId;
+        }
+
+        var file = Path.GetFileNameWithoutExtension(assignment.VoiceId);
         if (string.IsNullOrWhiteSpace(file))
         {
-            return voiceStylePath;
+            return assignment.VoiceId;
         }
 
-        // Try mapping known short codes first (F1, M1 etc.)
         if (_voiceDisplayNames.TryGetValue(file, out var mapped))
         {
             return mapped;
         }
 
-        // Fallback: return the filename/code as-is
         return file;
     }
 
@@ -196,4 +243,12 @@ public class SyntheziaQueueManager(
 
         return $"{userName} пишет: {message}";
     }
+
+    private enum VoiceEngine
+    {
+        Onnx,
+        WinApi,
+    }
+
+    private readonly record struct VoiceAssignment(VoiceEngine Engine, string VoiceId);
 }

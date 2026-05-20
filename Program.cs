@@ -1,5 +1,6 @@
 using MARS.AudioController.Services;
 using MARS.AudioController.Services.TTS;
+using System.Runtime.Versioning;
 
 namespace MARS.AudioController;
 
@@ -12,9 +13,10 @@ internal class Program
         builder.Services.AddSingleton<AudioControllerService>();
         builder.Services.AddSingleton<TtsPlaybackStateService>();
         builder.Services.AddSingleton<TtsPlaybackService>();
-        builder.Services.AddSingleton<SyntheziaQueueManager>();
-        builder.Services.AddSingleton<ISyntheziaQueueManager>(sp => sp.GetRequiredService<SyntheziaQueueManager>());
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<SyntheziaQueueManager>());
+        if (OperatingSystem.IsWindows())
+        {
+            RegisterWindowsTtsServices(builder.Services);
+        }
         builder.Services.AddHostedService<TtsHubClientHostedService>();
         builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
 
@@ -30,5 +32,16 @@ internal class Program
         app.MapGet("/", () => "Audio Controller REST Server is running!");
 
         app.Run();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void RegisterWindowsTtsServices(IServiceCollection services)
+    {
+        services.AddSingleton<SystemSpeechTtsPlaybackService>();
+        services.AddSingleton<SyntheziaQueueManager>();
+        services.AddSingleton<ISyntheziaQueueManager>(sp =>
+            sp.GetRequiredService<SyntheziaQueueManager>()
+        );
+        services.AddHostedService(sp => sp.GetRequiredService<SyntheziaQueueManager>());
     }
 }
