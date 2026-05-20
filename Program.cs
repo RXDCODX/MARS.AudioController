@@ -10,6 +10,7 @@ internal class Program
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddSingleton<AudioControllerService>();
+        builder.Services.AddSingleton<TtsPlaybackStateService>();
         builder.Services.AddSingleton<TtsPlaybackService>();
         builder.Services.AddSingleton<SyntheziaQueueManager>();
         builder.Services.AddSingleton<ISyntheziaQueueManager>(sp => sp.GetRequiredService<SyntheziaQueueManager>());

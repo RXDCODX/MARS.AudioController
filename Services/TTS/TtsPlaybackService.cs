@@ -4,7 +4,11 @@ using NAudio.Wave;
 
 namespace MARS.AudioController.Services.TTS;
 
-public class TtsPlaybackService(IWebHostEnvironment environment, ILogger<TtsPlaybackService> logger)
+public class TtsPlaybackService(
+    IWebHostEnvironment environment,
+    ILogger<TtsPlaybackService> logger,
+    TtsPlaybackStateService playbackState
+)
 {
     private readonly ConcurrentDictionary<string, Lazy<TextToSpeech>> _textToSpeechCache = new(
         StringComparer.OrdinalIgnoreCase
@@ -82,7 +86,17 @@ public class TtsPlaybackService(IWebHostEnvironment environment, ILogger<TtsPlay
                         request.SilenceDuration
                     );
 
-                    await PlayAudioAsync(wav, textToSpeech.SampleRate, cancellationToken);
+                    using var playbackCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                        cancellationToken,
+                        playbackState.PlaybackCancellationToken
+                    );
+
+                    await PlayAudioAsync(
+                        wav,
+                        textToSpeech.SampleRate,
+                        request.Volume,
+                        playbackCancellation.Token
+                    );
 
                     result = new TtsPlaybackResponse
                     {
@@ -143,6 +157,7 @@ public class TtsPlaybackService(IWebHostEnvironment environment, ILogger<TtsPlay
     private static async Task PlayAudioAsync(
         float[] audioData,
         int sampleRate,
+        double volume,
         CancellationToken cancellationToken
     )
     {
@@ -150,7 +165,7 @@ public class TtsPlaybackService(IWebHostEnvironment environment, ILogger<TtsPlay
             TaskCreationOptions.RunContinuationsAsynchronously
         );
 
-        var pcmBytes = ConvertToPcm16(audioData);
+        var pcmBytes = ConvertToPcm16(audioData, volume);
         using var memoryStream = new MemoryStream(pcmBytes, writable: false);
         using var sourceStream = new RawSourceWaveStream(
             memoryStream,
@@ -186,13 +201,14 @@ public class TtsPlaybackService(IWebHostEnvironment environment, ILogger<TtsPlay
         await completion.Task;
     }
 
-    private static byte[] ConvertToPcm16(float[] audioData)
+    private static byte[] ConvertToPcm16(float[] audioData, double volume)
     {
         var pcmBytes = new byte[audioData.Length * sizeof(short)];
+        var clampedVolume = Math.Clamp(volume, 0.0, 1.0);
 
         for (var i = 0; i < audioData.Length; i++)
         {
-            var sample = Math.Clamp(audioData[i], -1.0f, 1.0f);
+            var sample = Math.Clamp((float)(audioData[i] * clampedVolume), -1.0f, 1.0f);
             var intSample = (short)(sample * short.MaxValue);
             pcmBytes[i * 2] = (byte)(intSample & 0xFF);
             pcmBytes[i * 2 + 1] = (byte)((intSample >> 8) & 0xFF);

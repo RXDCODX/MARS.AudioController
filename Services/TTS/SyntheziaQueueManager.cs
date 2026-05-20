@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using MARS.AudioController.Models;
+using MARS.Server.Hubs.Models.VoiceRecognition;
 using MARS.Server.Services.Twitch.Entitys;
 
 namespace MARS.AudioController.Services.TTS;
@@ -8,10 +9,13 @@ namespace MARS.AudioController.Services.TTS;
 public interface ISyntheziaQueueManager
 {
     Task EnqueueAsync(TwitchUser user, string message);
+
+    Task ApplyStateAsync(TtsState state);
 }
 
 public class SyntheziaQueueManager(
     TtsPlaybackService ttsPlaybackService,
+    TtsPlaybackStateService playbackState,
     IConfiguration configuration,
     ILogger<SyntheziaQueueManager> logger
 ) : BackgroundService, ISyntheziaQueueManager
@@ -46,8 +50,30 @@ public class SyntheziaQueueManager(
             return Task.CompletedTask;
         }
 
+        if (playbackState.IsStopped)
+        {
+            logger.LogInformation("TTS message ignored because playback is stopped.");
+            return Task.CompletedTask;
+        }
+
         _queue.Enqueue((user, message));
         _signal.Release();
+        return Task.CompletedTask;
+    }
+
+    public Task ApplyStateAsync(TtsState state)
+    {
+        playbackState.ApplyState(state);
+
+        if (state.IsStopped)
+        {
+            while (_queue.TryDequeue(out _))
+            {
+            }
+
+            logger.LogInformation("TTS queue was cleared because playback was stopped.");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -56,6 +82,15 @@ public class SyntheziaQueueManager(
         while (!stoppingToken.IsCancellationRequested)
         {
             await _signal.WaitAsync(stoppingToken);
+
+            if (playbackState.IsStopped)
+            {
+                while (_queue.TryDequeue(out _))
+                {
+                }
+
+                continue;
+            }
 
             if (_queue.TryDequeue(out var queued))
             {
@@ -73,6 +108,7 @@ public class SyntheziaQueueManager(
                             {
                                 Text = greeting,
                                 VoiceStylePath = voiceStyle,
+                                Volume = playbackState.Volume,
                                 Language = "na",
                             },
                             stoppingToken
@@ -85,6 +121,7 @@ public class SyntheziaQueueManager(
                         {
                             Text = queued.Message,
                             VoiceStylePath = voiceStyle,
+                            Volume = playbackState.Volume,
                             Language = "na",
                         },
                         stoppingToken

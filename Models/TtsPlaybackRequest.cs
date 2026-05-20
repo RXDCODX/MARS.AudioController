@@ -10,6 +10,8 @@ public class TtsPlaybackRequest
 
     public string VoiceStylePath { get; set; } = "assets/voice_styles/M1.json";
 
+    public double Volume { get; set; } = 1.0;
+
     public bool UseGpu { get; set; } = false;
 
     public int TotalStep { get; set; } = 8;

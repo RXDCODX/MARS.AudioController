@@ -1,5 +1,6 @@
 using System.Net;
 using MARS.Server.Hubs.Interfaces;
+using MARS.Server.Hubs.Models.VoiceRecognition;
 using MARS.Server.Services.Twitch.Entitys;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -19,7 +20,10 @@ public class TtsHubClientHostedService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _hubUrl = configuration["TtsHub:Url"] ?? DefaultHubUrl;
-        _connection = new HubConnectionBuilder().WithUrl(_hubUrl).WithAutomaticReconnect().Build();
+        _connection = new HubConnectionBuilder()
+            .WithUrl(_hubUrl)
+            .WithAutomaticReconnect()
+            .Build();
 
         RegisterHandlers(_connection, stoppingToken);
 
@@ -72,6 +76,19 @@ public class TtsHubClientHostedService(
                 }
 
                 await queueManager.EnqueueAsync(user, message);
+            }
+        );
+
+        connection.On<TtsState>(
+            nameof(IVoiceRecognitionHub.UpdateTtsState),
+            async state =>
+            {
+                if (state is null)
+                {
+                    return;
+                }
+
+                await queueManager.ApplyStateAsync(state);
             }
         );
     }
