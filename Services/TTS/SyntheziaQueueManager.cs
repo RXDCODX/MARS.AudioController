@@ -25,7 +25,7 @@ public class SyntheziaQueueManager(
 {
     private readonly ConcurrentQueue<(TwitchUser User, string Message)> _queue = new();
     private readonly SemaphoreSlim _signal = new(0);
-    private readonly object _voicesGate = new();
+    private readonly Lock _voicesGate = new();
     private readonly Dictionary<string, VoiceAssignment> _linkedVoices = new(
         StringComparer.OrdinalIgnoreCase
     );
@@ -73,9 +73,7 @@ public class SyntheziaQueueManager(
 
         if (state.IsStopped)
         {
-            while (_queue.TryDequeue(out _))
-            {
-            }
+            while (_queue.TryDequeue(out _)) { }
 
             logger.LogInformation("TTS queue was cleared because playback was stopped.");
         }
@@ -91,9 +89,7 @@ public class SyntheziaQueueManager(
 
             if (playbackState.IsStopped)
             {
-                while (_queue.TryDequeue(out _))
-                {
-                }
+                while (_queue.TryDequeue(out _)) { }
 
                 continue;
             }
@@ -140,9 +136,10 @@ public class SyntheziaQueueManager(
             var availableBindings = BuildAvailableBindings();
             var fallback = new VoiceAssignment(VoiceEngine.Onnx, "assets/voice_styles/M1.json");
 
-            var choice = availableBindings.Count == 0
-                ? fallback
-                : availableBindings[Random.Shared.Next(availableBindings.Count)];
+            var choice =
+                availableBindings.Count == 0
+                    ? fallback
+                    : availableBindings[Random.Shared.Next(availableBindings.Count)];
 
             _linkedVoices[userKey] = choice;
             return (choice, true);
@@ -222,12 +219,7 @@ public class SyntheziaQueueManager(
             return assignment.VoiceId;
         }
 
-        if (_voiceDisplayNames.TryGetValue(file, out var mapped))
-        {
-            return mapped;
-        }
-
-        return file;
+        return _voiceDisplayNames.GetValueOrDefault(file, file);
     }
 
     private static string BuildSpeechText(TwitchUser user, string message)
