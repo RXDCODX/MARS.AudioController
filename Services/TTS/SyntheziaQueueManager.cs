@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using MARS.AudioController.Models;
 using MARS.Server.Services.Twitch.Entitys;
 
@@ -9,27 +10,34 @@ public interface ISyntheziaQueueManager
     Task EnqueueAsync(TwitchUser user, string message);
 }
 
-public class SyntheziaQueueManager : BackgroundService, ISyntheziaQueueManager
+public class SyntheziaQueueManager(
+    TtsPlaybackService ttsPlaybackService,
+    IConfiguration configuration,
+    ILogger<SyntheziaQueueManager> logger
+) : BackgroundService, ISyntheziaQueueManager
 {
     private readonly ConcurrentQueue<(TwitchUser User, string Message)> _queue = new();
     private readonly SemaphoreSlim _signal = new(0);
-    private readonly Dictionary<string, string> _linkedVoices = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<string> _availableVoiceStyles;
-    private readonly TtsPlaybackService _ttsPlaybackService;
-    private readonly ILogger<SyntheziaQueueManager> _logger;
-
-    public bool IsServiceActive { get; set; } = true;
-
-    public SyntheziaQueueManager(
-        TtsPlaybackService ttsPlaybackService,
-        IConfiguration configuration,
-        ILogger<SyntheziaQueueManager> logger
+    private readonly Dictionary<string, string> _linkedVoices = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private readonly Dictionary<string, string> _voiceDisplayNames = new(
+        StringComparer.OrdinalIgnoreCase
     )
     {
-        _ttsPlaybackService = ttsPlaybackService;
-        _logger = logger;
-        _availableVoiceStyles = configuration.GetSection("Tts:VoiceStyles").Get<List<string>>() ?? new List<string>();
-    }
+        { "M1", "Миша" },
+        { "M2", "Сергей" },
+        { "M3", "Алексей" },
+        { "M4", "Дмитрий" },
+        { "M5", "Андрей" },
+        { "F1", "Елена" },
+        { "F2", "Ольга" },
+        { "F3", "Наталья" },
+        { "F4", "Татьяна" },
+        { "F5", "Мария" },
+    };
+    private readonly List<string> _availableVoiceStyles =
+        configuration.GetSection("Tts:VoiceStyles").Get<List<string>>() ?? [];
 
     public Task EnqueueAsync(TwitchUser user, string message)
     {
@@ -53,39 +61,38 @@ public class SyntheziaQueueManager : BackgroundService, ISyntheziaQueueManager
             {
                 try
                 {
-                    var voiceStyle = ResolveOrAssignVoice(queued.User.TwitchId);
+                    var (voiceStyle, isNew) = ResolveOrAssignVoice(queued.User.TwitchId);
 
-                    // If this is a newly assigned voice, say greeting first
-                    var isNew = !_linkedVoices.ContainsKey(queued.User.TwitchId);
                     if (isNew)
                     {
-                        _linkedVoices[queued.User.TwitchId] = voiceStyle;
-                        var greeting = $"Привет, {queued.User.DisplayName}! Для тебя был выбран голос {voiceStyle}";
-                        await _ttsPlaybackService.PlayAsync(
+                        var displayName = GetVoiceDisplayName(voiceStyle);
+                        var greeting =
+                            $"Привет, {queued.User.DisplayName}! Для тебя был выбран голос {displayName}";
+                        await ttsPlaybackService.PlayAsync(
                             new TtsPlaybackRequest
                             {
                                 Text = greeting,
                                 VoiceStylePath = voiceStyle,
-                                Language = "ru"
+                                Language = "na",
                             },
                             stoppingToken
                         );
                     }
 
                     // Play the actual message
-                    await _ttsPlaybackService.PlayAsync(
+                    await ttsPlaybackService.PlayAsync(
                         new TtsPlaybackRequest
                         {
                             Text = queued.Message,
                             VoiceStylePath = voiceStyle,
-                            Language = "ru"
+                            Language = "na",
                         },
                         stoppingToken
                     );
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(
+                    logger.LogError(
                         ex,
                         "Failed to play queued TTS message for {User}",
                         queued.User.DisplayName
@@ -95,21 +102,46 @@ public class SyntheziaQueueManager : BackgroundService, ISyntheziaQueueManager
         }
     }
 
-    private string ResolveOrAssignVoice(string userKey)
+    private (string VoiceStyle, bool IsNew) ResolveOrAssignVoice(string userKey)
     {
         if (_linkedVoices.TryGetValue(userKey, out var existing))
         {
-            return existing;
+            return (existing, false);
         }
 
         if (_availableVoiceStyles.Count == 0)
         {
-            return "assets/voice_styles/M1.json";
+            var fallback = "assets/voice_styles/M1.json";
+            _linkedVoices[userKey] = fallback;
+            return (fallback, true);
         }
 
         var index = Random.Shared.Next(_availableVoiceStyles.Count);
         var choice = _availableVoiceStyles[index];
         _linkedVoices[userKey] = choice;
-        return choice;
+        return (choice, true);
+    }
+
+    private string GetVoiceDisplayName(string voiceStylePath)
+    {
+        if (string.IsNullOrWhiteSpace(voiceStylePath))
+        {
+            return voiceStylePath;
+        }
+
+        var file = Path.GetFileNameWithoutExtension(voiceStylePath);
+        if (string.IsNullOrWhiteSpace(file))
+        {
+            return voiceStylePath;
+        }
+
+        // Try mapping known short codes first (F1, M1 etc.)
+        if (_voiceDisplayNames.TryGetValue(file, out var mapped))
+        {
+            return mapped;
+        }
+
+        // Fallback: return the filename/code as-is
+        return file;
     }
 }

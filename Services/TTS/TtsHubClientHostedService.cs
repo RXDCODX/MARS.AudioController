@@ -1,4 +1,7 @@
+using System.Net;
+using MARS.Server.Hubs.Interfaces;
 using MARS.Server.Services.Twitch.Entitys;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace MARS.AudioController.Services.TTS;
@@ -9,7 +12,7 @@ public class TtsHubClientHostedService(
     ILogger<TtsHubClientHostedService> logger
 ) : BackgroundService
 {
-    private const string DefaultHubUrl = "http://127.0.0.1:9255/hubs/voice-recognition";
+    private const string DefaultHubUrl = "http://localhost:9255/hubs/tts";
     private string _hubUrl = DefaultHubUrl;
     private HubConnection? _connection;
 
@@ -59,8 +62,8 @@ public class TtsHubClientHostedService(
 
     private void RegisterHandlers(HubConnection connection, CancellationToken stoppingToken)
     {
-        connection.On<TwitchUser?, string>(
-            "PlayTts",
+        connection.On<TwitchUser, string>(
+            nameof(IVoiceRecognitionHub.PlayTts),
             async (user, message) =>
             {
                 if (user is null || string.IsNullOrWhiteSpace(message))
@@ -82,7 +85,18 @@ public class TtsHubClientHostedService(
 
         if (_connection.State == HubConnectionState.Disconnected)
         {
-            await _connection.StartAsync(stoppingToken);
+            for (var i = 0; i <= 10; i++)
+            {
+                try
+                {
+                    await _connection.StartAsync(stoppingToken);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to connect to TTS hub at {HubUrl}", _hubUrl);
+                }
+            }
             await RegisterAsConsumerAsync(stoppingToken);
             logger.LogInformation("Connected to TTS hub at {HubUrl}", _hubUrl);
         }

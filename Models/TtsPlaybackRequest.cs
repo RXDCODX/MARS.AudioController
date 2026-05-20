@@ -4,7 +4,7 @@ public class TtsPlaybackRequest
 {
     public string Text { get; set; } = string.Empty;
 
-    public string Language { get; set; } = "ru";
+    public string Language { get; set; } = "na";
 
     public string OnnxDir { get; set; } = "assets/onnx";
 
@@ -12,7 +12,7 @@ public class TtsPlaybackRequest
 
     public bool UseGpu { get; set; } = false;
 
-    public int TotalStep { get; set; } = 24;
+    public int TotalStep { get; set; } = 8;
 
     public float Speed { get; set; } = 1.05f;
 
