@@ -155,34 +155,34 @@ public class TtsPlaybackService(
         return lazy.Value;
     }
 
-        private static async Task PlayAudioAsync(
-            float[] audioData,
-            int sampleRate,
-            double volume,
-            CancellationToken cancellationToken
-        )
+    private static async Task PlayAudioAsync(
+        float[] audioData,
+        int sampleRate,
+        double volume,
+        CancellationToken cancellationToken
+    )
     {
         var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
 
-            // Convert raw float samples to 16-bit PCM (no volume adjustment here)
-            var pcmBytes = ConvertToPcm16(audioData);
-            using var memoryStream = new MemoryStream(pcmBytes, writable: false);
-            using var sourceStream = new RawSourceWaveStream(
-                memoryStream,
-                new WaveFormat(sampleRate, 16, 1)
-            );
+        // Convert raw float samples to 16-bit PCM (no volume adjustment here)
+        var pcmBytes = ConvertToPcm16(audioData);
+        using var memoryStream = new MemoryStream(pcmBytes, writable: false);
+        using var sourceStream = new RawSourceWaveStream(
+            memoryStream,
+            new WaveFormat(sampleRate, 16, 1)
+        );
 
-            // Use NAudio sample providers so we can apply a high-quality volume gain.
-            var sampleProvider = sourceStream.ToSampleProvider();
-            var clampedVolume = (float)Math.Clamp(volume, 0.0, 2.0);
-            var volumeProvider = new VolumeSampleProvider(sampleProvider)
-            {
-                Volume = clampedVolume,
-            };
+        // Use NAudio sample providers so we can apply a high-quality volume gain.
+        var sampleProvider = sourceStream.ToSampleProvider();
+        var clampedVolume = (float)Math.Clamp(volume, 0.0, 2.0);
+        var volumeProvider = new VolumeSampleProvider(sampleProvider)
+        {
+            Volume = clampedVolume,
+        };
 
-            using var waveOut = new WaveOutEvent();
+        using var waveOut = new WaveOutEvent();
 
         EventHandler<StoppedEventArgs>? playbackStoppedHandler = null;
         playbackStoppedHandler = (_, _) =>
@@ -213,20 +213,20 @@ public class TtsPlaybackService(
         await completion.Task;
     }
 
-        private static byte[] ConvertToPcm16(float[] audioData)
+    private static byte[] ConvertToPcm16(float[] audioData)
+    {
+        var pcmBytes = new byte[audioData.Length * sizeof(short)];
+
+        for (var i = 0; i < audioData.Length; i++)
         {
-            var pcmBytes = new byte[audioData.Length * sizeof(short)];
-
-            for (var i = 0; i < audioData.Length; i++)
-            {
-                var sample = Math.Clamp(audioData[i], -1.0f, 1.0f);
-                var intSample = (short)(sample * short.MaxValue);
-                pcmBytes[i * 2] = (byte)(intSample & 0xFF);
-                pcmBytes[i * 2 + 1] = (byte)((intSample >> 8) & 0xFF);
-            }
-
-            return pcmBytes;
+            var sample = Math.Clamp(audioData[i], -1.0f, 1.0f);
+            var intSample = (short)(sample * short.MaxValue);
+            pcmBytes[i * 2] = (byte)(intSample & 0xFF);
+            pcmBytes[i * 2 + 1] = (byte)((intSample >> 8) & 0xFF);
         }
+
+        return pcmBytes;
+    }
 
     private string ResolvePath(string path, string defaultPath)
     {
