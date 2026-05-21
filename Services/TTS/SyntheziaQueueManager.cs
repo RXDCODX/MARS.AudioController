@@ -2,8 +2,6 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.Versioning;
 using MARS.AudioController.Models;
-using MARS.Server.Hubs.Models.VoiceRecognition;
-using MARS.Server.Services.Twitch.Entitys;
 
 namespace MARS.AudioController.Services.TTS;
 
