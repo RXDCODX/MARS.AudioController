@@ -19,16 +19,14 @@ public class TtsPlaybackService(
     );
     private readonly SemaphoreSlim _playbackLock = new(1, 1);
 
+    private const float MaxVolume = 7.0f; // Maximum playback gain (700% of base volume)
+
     public async Task<TtsPlaybackResponse> PlayAsync(
         TtsPlaybackRequest request,
         CancellationToken cancellationToken = default
     )
     {
-        var result = new TtsPlaybackResponse
-        {
-            Success = false,
-            Message = "TTS playback failed",
-        };
+        var result = new TtsPlaybackResponse { Success = false, Message = "TTS playback failed" };
 
         if (request == null)
         {
@@ -87,10 +85,11 @@ public class TtsPlaybackService(
                         request.SilenceDuration
                     );
 
-                    using var playbackCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                        cancellationToken,
-                        playbackState.PlaybackCancellationToken
-                    );
+                    using var playbackCancellation =
+                        CancellationTokenSource.CreateLinkedTokenSource(
+                            cancellationToken,
+                            playbackState.PlaybackCancellationToken
+                        );
 
                     await PlayAudioAsync(
                         wav,
@@ -104,7 +103,8 @@ public class TtsPlaybackService(
                         Success = true,
                         Message = "TTS playback completed",
                         SampleRate = textToSpeech.SampleRate,
-                        Duration = duration.Length > 0 ? TimeSpan.FromSeconds(duration[0]) : TimeSpan.Zero,
+                        Duration =
+                            duration.Length > 0 ? TimeSpan.FromSeconds(duration[0]) : TimeSpan.Zero,
                         Text = request.Text,
                         Language = request.Language,
                         OnnxDir = resolvedOnnxDir,
@@ -131,11 +131,10 @@ public class TtsPlaybackService(
         var cacheKey = $"{onnxDir}|{useGpu}";
         var lazy = _textToSpeechCache.GetOrAdd(
             cacheKey,
-            _ =>
-                new Lazy<TextToSpeech>(
-                    () => Helper.LoadTextToSpeech(onnxDir, useGpu),
-                    LazyThreadSafetyMode.ExecutionAndPublication
-                )
+            _ => new Lazy<TextToSpeech>(
+                () => Helper.LoadTextToSpeech(onnxDir, useGpu),
+                LazyThreadSafetyMode.ExecutionAndPublication
+            )
         );
 
         return lazy.Value;
@@ -145,11 +144,10 @@ public class TtsPlaybackService(
     {
         var lazy = _styleCache.GetOrAdd(
             voiceStylePath,
-            _ =>
-                new Lazy<Style>(
-                    () => Helper.LoadVoiceStyle([voiceStylePath], verbose: false),
-                    LazyThreadSafetyMode.ExecutionAndPublication
-                )
+            _ => new Lazy<Style>(
+                () => Helper.LoadVoiceStyle([voiceStylePath], verbose: false),
+                LazyThreadSafetyMode.ExecutionAndPublication
+            )
         );
 
         return lazy.Value;
@@ -176,11 +174,9 @@ public class TtsPlaybackService(
 
         // Use NAudio sample providers so we can apply a high-quality volume gain.
         var sampleProvider = sourceStream.ToSampleProvider();
-        var clampedVolume = (float)Math.Clamp(volume, 0.0, 2.0);
-        var volumeProvider = new VolumeSampleProvider(sampleProvider)
-        {
-            Volume = clampedVolume,
-        };
+        var normalizedVolume = (float)Math.Clamp(volume, 0.0, 2.0) / 2.0f;
+        var gain = normalizedVolume * MaxVolume;
+        var volumeProvider = new VolumeSampleProvider(sampleProvider) { Volume = gain };
 
         using var waveOut = new WaveOutEvent();
 
