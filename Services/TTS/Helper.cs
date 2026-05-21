@@ -72,7 +72,6 @@ public class Config
 // ============================================================================
 // Style class
 // ============================================================================
-
 public class Style(float[] ttl, long[] ttlShape, float[] dp, long[] dpShape)
 {
     public float[] Ttl { get; set; } = ttl;
@@ -492,6 +491,7 @@ public class TextToSpeech(
             throw new ArgumentException("Single speaker text to speech only supports single style");
         }
 
+        text = Helper.NormalizeSpeechText(text);
         var maxLen = (lang == "ko" || lang == "ja") ? 120 : 300;
         var textList = Helper.ChunkText(text, maxLen);
         var wavCat = new List<float>();
@@ -540,6 +540,100 @@ public static class Helper
     // ============================================================================
     // Utility functions
     // ============================================================================
+
+    private static readonly Regex SpeechLinkPattern = new(
+        @"(?ix)
+          \b(
+              https?://[^\s<>()\[\]{}]+
+              |
+              www\.[^\s<>()\[\]{}]+
+              |
+              (?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>()\[\]{}]+)?
+          )",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant
+    );
+
+    private static readonly HashSet<string> CommonSecondLevelTlds = new(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        "ac",
+        "co",
+        "com",
+        "edu",
+        "gov",
+        "go",
+        "mil",
+        "ne",
+        "net",
+        "or",
+        "org",
+    };
+
+    public static string NormalizeSpeechText(string text)
+    {
+        var result = text;
+
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            result = SpeechLinkPattern.Replace(result, match => GetSiteNameFromLink(match.Value));
+        }
+
+        return result;
+    }
+
+    private static string GetSiteNameFromLink(string rawLink)
+    {
+        var result = rawLink.Trim();
+
+        if (TryGetHostFromLink(result, out var host))
+        {
+            result = GetSiteNameFromHost(host);
+        }
+
+        return result;
+    }
+
+    private static bool TryGetHostFromLink(string rawLink, out string host)
+    {
+        var result = string.Empty;
+
+        var link = rawLink.Trim().TrimEnd('.', ',', '!', '?', ';', ':', ')', ']', '}', '>');
+        if (Uri.TryCreate(link, UriKind.Absolute, out var absoluteUri))
+        {
+            result = absoluteUri.Host;
+        }
+        else if (Uri.TryCreate($"https://{link}", UriKind.Absolute, out absoluteUri))
+        {
+            result = absoluteUri.Host;
+        }
+
+        host = result;
+        return !string.IsNullOrWhiteSpace(host);
+    }
+
+    private static string GetSiteNameFromHost(string host)
+    {
+        var result = host.Trim('.').ToLowerInvariant();
+
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            var labels = result.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (labels.Length == 1)
+            {
+                result = labels[0];
+            }
+            else if (labels.Length >= 3 && labels[^1].Length == 2 && CommonSecondLevelTlds.Contains(labels[^2]))
+            {
+                result = labels[^3];
+            }
+            else
+            {
+                result = labels[^2];
+            }
+        }
+
+        return result;
+    }
 
     public static float[][][] LengthToMask(long[] lengths, long maxLen = -1)
     {

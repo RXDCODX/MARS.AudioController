@@ -226,12 +226,13 @@ public class SyntheziaQueueManager(
             ? user.UserLogin
             : user.DisplayName;
 
-        if (string.IsNullOrWhiteSpace(userName))
-        {
-            return message;
-        }
+        var result = string.IsNullOrWhiteSpace(userName)
+            ? message
+            : $"{userName} пишет: {message}";
 
-        return $"{userName} пишет: {message}";
+        result = Helper.NormalizeSpeechText(result);
+
+        return result;
     }
 
     private enum VoiceEngine

@@ -29,7 +29,7 @@ public class TtsPlaybackStateService
 
         lock (_gate)
         {
-            Volume = Math.Clamp(state.Volume, 0.0, 1.0);
+            Volume = Math.Clamp(state.Volume, 0.0, 2.0);
 
             if (state.IsStopped)
             {
