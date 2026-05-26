@@ -19,7 +19,7 @@ public class TtsPlaybackService(
     );
     private readonly SemaphoreSlim _playbackLock = new(1, 1);
 
-    private const float MaxVolume = 10.0f; // Maximum playback gain (700% of base volume)
+    private const float MaxVolume = 7.0f; // Maximum playback gain (700% of base volume)
 
     public async Task<TtsPlaybackResponse> PlayAsync(
         TtsPlaybackRequest request,
