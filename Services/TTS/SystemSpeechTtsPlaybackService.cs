@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Speech.Synthesis;
+using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 
 namespace MARS.AudioController.Services.TTS;
 
@@ -8,6 +10,7 @@ namespace MARS.AudioController.Services.TTS;
 public class SystemSpeechTtsPlaybackService(ILogger<SystemSpeechTtsPlaybackService> logger)
 {
     private readonly SemaphoreSlim _playbackLock = new(1, 1);
+    private const float MaxVolume = 6.0f;
 
     public List<string> GetInstalledVoices()
     {
@@ -48,82 +51,22 @@ public class SystemSpeechTtsPlaybackService(ILogger<SystemSpeechTtsPlaybackServi
             await _playbackLock.WaitAsync(cancellationToken);
             try
             {
-                using var speech = new SpeechSynthesizer();
-                var completion = new TaskCompletionSource<bool>(
-                    TaskCreationOptions.RunContinuationsAsynchronously
-                );
+                var wavBytes = await GenerateSpeechWavAsync(text, voiceName, cancellationToken);
 
-                speech.SetOutputToDefaultAudioDevice();
-                speech.Volume = Math.Clamp((int)Math.Round(volume * 100.0), 0, 100);
-
-                if (!string.IsNullOrWhiteSpace(voiceName))
+                if (wavBytes.Length > 0)
                 {
-                    var installedVoice = speech
-                        .GetInstalledVoices(new CultureInfo("ru-RU"))
-                        .FirstOrDefault(v =>
-                            string.Equals(
-                                v.VoiceInfo.Name,
-                                voiceName,
-                                StringComparison.OrdinalIgnoreCase
-                            )
-                        );
-
-                    if (installedVoice is not null)
-                    {
-                        speech.SelectVoice(installedVoice.VoiceInfo.Name);
-                    }
-                }
-
-                EventHandler<SpeakCompletedEventArgs>? speakCompletedHandler = null;
-                speakCompletedHandler = (_, eventArgs) =>
-                {
-                    speech.SpeakCompleted -= speakCompletedHandler;
-
-                    if (eventArgs.Error is not null)
-                    {
-                        completion.TrySetException(eventArgs.Error);
-                    }
-                    else if (eventArgs.Cancelled)
-                    {
-                        completion.TrySetCanceled();
-                    }
-                    else
-                    {
-                        completion.TrySetResult(true);
-                    }
-                };
-
-                speech.SpeakCompleted += speakCompletedHandler;
-                speech.SpeakAsync(text);
-
-                using var cancellationRegistration = cancellationToken.Register(() =>
-                {
-                    try
-                    {
-                        speech.SpeakAsyncCancelAll();
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Failed to cancel System Speech playback.");
-                    }
-
-                    completion.TrySetCanceled(cancellationToken);
-                });
-
-                try
-                {
-                    await completion.Task;
+                    await PlayWavAsync(wavBytes, volume, cancellationToken);
                     result = true;
                 }
-                catch (OperationCanceledException)
-                {
-                    result = false;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "System Speech playback failed.");
-                    result = false;
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                result = false;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "System Speech playback failed.");
+                result = false;
             }
             finally
             {
@@ -132,5 +75,139 @@ public class SystemSpeechTtsPlaybackService(ILogger<SystemSpeechTtsPlaybackServi
         }
 
         return result;
+    }
+
+    public async Task<byte[]> GenerateSpeechWavAsync(
+        string text,
+        string? voiceName,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var result = Array.Empty<byte>();
+
+        if (!OperatingSystem.IsWindows())
+        {
+            logger.LogWarning("System Speech synthesis is only available on Windows.");
+        }
+        else if (string.IsNullOrWhiteSpace(text))
+        {
+            logger.LogWarning("System Speech synthesis was skipped because text is empty.");
+        }
+        else
+        {
+            using var speech = new SpeechSynthesizer();
+            using var waveStream = new MemoryStream();
+            var completion = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            );
+
+            speech.SetOutputToWaveStream(waveStream);
+            speech.Volume = 100;
+
+            if (!string.IsNullOrWhiteSpace(voiceName))
+            {
+                var installedVoice = speech
+                    .GetInstalledVoices(new CultureInfo("ru-RU"))
+                    .FirstOrDefault(v =>
+                        string.Equals(
+                            v.VoiceInfo.Name,
+                            voiceName,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    );
+
+                if (installedVoice is not null)
+                {
+                    speech.SelectVoice(installedVoice.VoiceInfo.Name);
+                }
+            }
+
+            EventHandler<SpeakCompletedEventArgs>? speakCompletedHandler = null;
+            speakCompletedHandler = (_, eventArgs) =>
+            {
+                speech.SpeakCompleted -= speakCompletedHandler;
+
+                if (eventArgs.Error is not null)
+                {
+                    completion.TrySetException(eventArgs.Error);
+                }
+                else if (eventArgs.Cancelled)
+                {
+                    completion.TrySetCanceled();
+                }
+                else
+                {
+                    completion.TrySetResult(true);
+                }
+            };
+
+            speech.SpeakCompleted += speakCompletedHandler;
+            speech.SpeakAsync(text);
+
+            using var cancellationRegistration = cancellationToken.Register(() =>
+            {
+                try
+                {
+                    speech.SpeakAsyncCancelAll();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to cancel System Speech synthesis.");
+                }
+
+                completion.TrySetCanceled(cancellationToken);
+            });
+
+            await completion.Task;
+            result = waveStream.ToArray();
+        }
+
+        return result;
+    }
+
+    private static async Task PlayWavAsync(
+        byte[] wavBytes,
+        double volume,
+        CancellationToken cancellationToken
+    )
+    {
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+
+        using var memoryStream = new MemoryStream(wavBytes, writable: false);
+        using var reader = new WaveFileReader(memoryStream);
+        var sampleProvider = reader.ToSampleProvider();
+        var normalizedVolume = (float)Math.Clamp(volume, 0.0, 2.0) / 2.0f;
+        var gain = normalizedVolume * MaxVolume;
+        var volumeProvider = new VolumeSampleProvider(sampleProvider) { Volume = gain };
+        using var waveOut = new WaveOutEvent();
+
+        EventHandler<StoppedEventArgs>? playbackStoppedHandler = null;
+        playbackStoppedHandler = (_, _) =>
+        {
+            waveOut.PlaybackStopped -= playbackStoppedHandler;
+            completion.TrySetResult(true);
+        };
+
+        waveOut.PlaybackStopped += playbackStoppedHandler;
+        waveOut.Init(volumeProvider.ToWaveProvider16());
+        waveOut.Play();
+
+        using var cancellationRegistration = cancellationToken.Register(() =>
+        {
+            try
+            {
+                waveOut.Stop();
+            }
+            catch
+            {
+                // Ignore shutdown errors when the request is cancelled.
+            }
+
+            completion.TrySetCanceled(cancellationToken);
+        });
+
+        await completion.Task;
     }
 }
