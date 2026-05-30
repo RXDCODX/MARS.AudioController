@@ -1,4 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using MARS.AudioController.Models;
+using Microsoft.Extensions.Logging;
 using NAudio.Wave;
 
 namespace MARS.AudioController.Services;
@@ -179,7 +186,7 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
         {
             await _queueLock.WaitAsync();
             StopPlayback();
-            _playCancellationTokenSource?.Cancel();
+            await _playCancellationTokenSource?.CancelAsync()!;
             _playCancellationTokenSource = new CancellationTokenSource();
         }
         finally
@@ -196,7 +203,7 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
         {
             await _queueLock.WaitAsync();
             StopPlayback();
-            _playCancellationTokenSource?.Cancel();
+            await _playCancellationTokenSource?.CancelAsync()!;
             _playCancellationTokenSource = new CancellationTokenSource();
 
             // Clear queue
@@ -462,7 +469,7 @@ public class AudioPlaybackQueueService : IAudioPlaybackQueueService, IAsyncDispo
 
         await StopAndClearAsync();
         _playCancellationTokenSource?.Dispose();
-        _audioFileReader?.Dispose();
+        _audioFileReader?.DisposeAsync();
         _wavePlayer?.Dispose();
         _queueLock.Dispose();
 

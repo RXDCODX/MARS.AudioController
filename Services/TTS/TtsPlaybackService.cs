@@ -1,5 +1,11 @@
+using System;
 using System.Collections.Concurrent;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using MARS.AudioController.Models;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -19,7 +25,7 @@ public class TtsPlaybackService(
     );
     private readonly SemaphoreSlim _playbackLock = new(1, 1);
 
-    private const float MaxVolume = 6.0f; // Maximum playback gain (700% of base volume)
+    private const float MaxVolume = 4.0f; // Maximum playback gain (700% of base volume)
 
     public async Task<TtsPlaybackResponse> PlayAsync(
         TtsPlaybackRequest request,
@@ -167,7 +173,7 @@ public class TtsPlaybackService(
         // Convert raw float samples to 16-bit PCM (no volume adjustment here)
         var pcmBytes = ConvertToPcm16(audioData);
         using var memoryStream = new MemoryStream(pcmBytes, writable: false);
-        using var sourceStream = new RawSourceWaveStream(
+        await using var sourceStream = new RawSourceWaveStream(
             memoryStream,
             new WaveFormat(sampleRate, 16, 1)
         );
@@ -192,7 +198,7 @@ public class TtsPlaybackService(
         waveOut.Init(volumeProvider);
         waveOut.Play();
 
-        using var cancellationRegistration = cancellationToken.Register(() =>
+        await using var cancellationRegistration = cancellationToken.Register(() =>
         {
             try
             {

@@ -1,3 +1,6 @@
+using System;
+using System.Threading;
+
 namespace MARS.AudioController.Services.TTS;
 
 public class TtsPlaybackStateService
