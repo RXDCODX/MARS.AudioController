@@ -2,7 +2,7 @@ namespace MARS.AudioController.Services.TTS;
 
 public class TtsPlaybackStateService
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private CancellationTokenSource _stopCancellation = new();
 
     public bool IsStopped { get; private set; }
