@@ -11,6 +11,8 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
     <PackageReference Include="NAudio" />
+    <PackageReference Include="obs-websocket-dotnet" />
+    <PackageReference Include="Newtonsoft.Json" />
     <PackageReference Include="System.Speech" />
   </ItemGroup>
 

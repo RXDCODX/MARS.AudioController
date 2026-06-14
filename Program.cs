@@ -1,6 +1,8 @@
 using System.Runtime.Versioning;
 using MARS.AudioController.Services;
+using MARS.AudioController.Services.Obs;
 using MARS.AudioController.Services.TTS;
+using OBSWebsocketDotNet;
 
 namespace MARS.AudioController;
 
@@ -22,6 +24,16 @@ internal class Program
 
         // Register audio playback queue service
         builder.Services.AddHttpClient<IAudioPlaybackQueueService, AudioPlaybackQueueService>();
+
+        // OBS Websocket service
+        builder.Services.AddSingleton<IOBSWebsocket>(sp => new OBSWebsocket());
+        builder.Services.AddSingleton<IObsService, ObsService>();
+        builder.Services.AddSingleton<ObsProcessMonitor>();
+        builder.Services.AddSingleton<IObsProcessMonitor>(sp =>
+            sp.GetRequiredService<ObsProcessMonitor>()
+        );
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<ObsProcessMonitor>());
+
         builder.Services.AddControllers();
         builder.Logging.AddConsole();
 
