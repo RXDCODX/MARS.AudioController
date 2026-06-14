@@ -12,7 +12,5 @@ public class ObsConfiguration
 
     public string PauseSceneName { get; set; } = "PauseScreenScene";
 
-    public string PauseImageSourceName { get; set; } = "__pause_image__";
-
     public int ScreenshotQuality { get; set; } = 100;
 }

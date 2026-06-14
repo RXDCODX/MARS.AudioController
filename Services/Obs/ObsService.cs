@@ -17,6 +17,7 @@ public class ObsService(
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     private string? _savedSceneBeforePause;
+    private string? _currentPauseSourceName;
     private bool _disposed;
 
     public bool IsConnected => obs.IsConnected;
@@ -91,17 +92,19 @@ public class ObsService(
             );
 
             logger.LogDebug("Screenshot saved to {Path}", filePath);
-
-            return filePath;
         }
         finally
         {
             _lock.Release();
         }
+
+        return filePath;
     }
 
     public async Task<ObsPauseResult> FreezeAsync(CancellationToken cancellationToken = default)
     {
+        string screenshotPath;
+
         await _lock.WaitAsync(cancellationToken);
         try
         {
@@ -117,15 +120,13 @@ public class ObsService(
 
             EnsurePauseSceneSetup();
 
-            var screenshotPath = await TakeScreenshotInternalAsync(currentScene);
+            screenshotPath = await TakeScreenshotInternalAsync(currentScene);
 
             UpdatePauseImageSource(screenshotPath);
             ShowPauseScreenScene(currentScene);
 
             IsPaused = true;
             logger.LogInformation("Pause activated on scene {Scene}", currentScene);
-
-            return ObsPauseResult.Ok(screenshotPath);
         }
         catch (Exception ex)
         {
@@ -136,6 +137,8 @@ public class ObsService(
         {
             _lock.Release();
         }
+
+        return ObsPauseResult.Ok(screenshotPath);
     }
 
     public async Task<ObsPauseResult> UnfreezeAsync(CancellationToken cancellationToken = default)
@@ -159,8 +162,6 @@ public class ObsService(
             _savedSceneBeforePause = null;
 
             logger.LogInformation("Pause deactivated");
-
-            return ObsPauseResult.Ok();
         }
         catch (Exception ex)
         {
@@ -171,12 +172,16 @@ public class ObsService(
         {
             _lock.Release();
         }
+
+        return ObsPauseResult.Ok();
     }
 
     public async Task<ObsPauseResult> SwitchToPauseSceneAsync(
         CancellationToken cancellationToken = default
     )
     {
+        string screenshotPath;
+
         await _lock.WaitAsync(cancellationToken);
         try
         {
@@ -190,7 +195,9 @@ public class ObsService(
             var currentScene = obs.GetCurrentProgramScene();
             _savedSceneBeforePause = currentScene;
 
-            var screenshotPath = await TakeScreenshotInternalAsync(currentScene);
+            EnsurePauseSceneSetup();
+
+            screenshotPath = await TakeScreenshotInternalAsync(currentScene);
 
             UpdatePauseImageSource(screenshotPath);
 
@@ -198,8 +205,6 @@ public class ObsService(
 
             IsPaused = true;
             logger.LogInformation("Switched to pause scene (from {Scene})", currentScene);
-
-            return ObsPauseResult.Ok(screenshotPath);
         }
         catch (Exception ex)
         {
@@ -210,6 +215,8 @@ public class ObsService(
         {
             _lock.Release();
         }
+
+        return ObsPauseResult.Ok(screenshotPath);
     }
 
     public async Task<ObsPauseResult> SwitchFromPauseSceneAsync(
@@ -234,8 +241,6 @@ public class ObsService(
             _savedSceneBeforePause = null;
 
             logger.LogInformation("Switched from pause scene to {Scene}", targetScene);
-
-            return ObsPauseResult.Ok();
         }
         catch (Exception ex)
         {
@@ -246,6 +251,8 @@ public class ObsService(
         {
             _lock.Release();
         }
+
+        return ObsPauseResult.Ok();
     }
 
     public async Task<ObsPauseResult> TogglePauseAsync(
@@ -315,19 +322,16 @@ public class ObsService(
 
     private void EnsurePauseSceneSetup()
     {
-        try
-        {
-            obs.GetInputSettings(_config.PauseImageSourceName);
-            return;
-        }
-        catch { }
+        RemovePauseInput();
+
+        _currentPauseSourceName = Guid.NewGuid().ToString();
 
         try
         {
             var defaultSettings = new JObject { { "file", "" } };
             obs.CreateInput(
                 _config.PauseSceneName,
-                _config.PauseImageSourceName,
+                _currentPauseSourceName,
                 "image_source",
                 defaultSettings,
                 true
@@ -335,7 +339,7 @@ public class ObsService(
 
             logger.LogInformation(
                 "Created pause image source '{Source}' in scene '{Scene}'",
-                _config.PauseImageSourceName,
+                _currentPauseSourceName,
                 _config.PauseSceneName
             );
         }
@@ -344,7 +348,7 @@ public class ObsService(
             logger.LogWarning(
                 ex,
                 "Failed to create pause image source '{Source}'",
-                _config.PauseImageSourceName
+                _currentPauseSourceName
             );
         }
     }
@@ -353,32 +357,53 @@ public class ObsService(
     {
         try
         {
-            obs.RemoveInput(_config.PauseImageSourceName);
-            logger.LogInformation(
-                "Removed pause image source '{Source}'",
-                _config.PauseImageSourceName
-            );
+            var sceneItems = obs.GetSceneItemList(_config.PauseSceneName);
+            if (sceneItems == null)
+            {
+                return;
+            }
+
+            foreach (var item in sceneItems)
+            {
+                try
+                {
+                    obs.RemoveInput(item.SourceName);
+                    logger.LogInformation(
+                        "Removed input '{Source}' from pause scene",
+                        item.SourceName
+                    );
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Failed to remove input '{Source}' from pause scene",
+                        item.SourceName
+                    );
+                }
+            }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(
-                ex,
-                "Failed to remove pause image source '{Source}'",
-                _config.PauseImageSourceName
-            );
+            logger.LogWarning(ex, "Failed to list scene items for pause scene");
         }
     }
 
     private void UpdatePauseImageSource(string imagePath)
     {
+        if (_currentPauseSourceName == null)
+        {
+            return;
+        }
+
         try
         {
             var settings = new JObject { { "file", imagePath } };
-            obs.SetInputSettings(_config.PauseImageSourceName, settings, true);
+            obs.SetInputSettings(_currentPauseSourceName, settings, true);
 
             var itemId = obs.GetSceneItemId(
                 _config.PauseSceneName,
-                _config.PauseImageSourceName,
+                _currentPauseSourceName,
                 0
             );
             obs.SetSceneItemEnabled(_config.PauseSceneName, itemId, true);
@@ -388,7 +413,7 @@ public class ObsService(
             logger.LogWarning(
                 ex,
                 "Failed to update pause image source '{Source}'",
-                _config.PauseImageSourceName
+                _currentPauseSourceName
             );
         }
     }
