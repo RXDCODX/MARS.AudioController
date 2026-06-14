@@ -10,9 +10,9 @@ public class ObsConfiguration
 
     public string Password { get; set; } = string.Empty;
 
-    public string PauseSceneName { get; set; } = "Pause";
+    public string PauseSceneName { get; set; } = "PauseScreenScene";
 
     public string PauseImageSourceName { get; set; } = "__pause_image__";
 
-    public int ScreenshotQuality { get; set; } = 80;
+    public int ScreenshotQuality { get; set; } = 100;
 }

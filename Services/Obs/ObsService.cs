@@ -82,7 +82,7 @@ public class ObsService(
         try
         {
             obs.SaveSourceScreenshot(
-                _config.PauseSceneName,
+                sceneName,
                 "webp",
                 filePath,
                 -1,
@@ -273,14 +273,7 @@ public class ObsService(
         var fileName = $"obs_pause_{DateTime.Now:yyyyMMdd_HHmmss}.webp";
         var filePath = Path.Combine(screenshotDir, fileName);
 
-        obs.SaveSourceScreenshot(
-            _config.PauseSceneName,
-            "webp",
-            filePath,
-            -1,
-            -1,
-            _config.ScreenshotQuality
-        );
+        obs.SaveSourceScreenshot(sceneName, "webp", filePath, -1, -1, _config.ScreenshotQuality);
 
         return Task.FromResult(filePath);
     }
@@ -327,9 +320,7 @@ public class ObsService(
             obs.GetInputSettings(_config.PauseImageSourceName);
             return;
         }
-        catch
-        {
-        }
+        catch { }
 
         try
         {
@@ -339,7 +330,7 @@ public class ObsService(
                 _config.PauseImageSourceName,
                 "image_source",
                 defaultSettings,
-                false
+                true
             );
 
             logger.LogInformation(
@@ -384,6 +375,13 @@ public class ObsService(
         {
             var settings = new JObject { { "file", imagePath } };
             obs.SetInputSettings(_config.PauseImageSourceName, settings, true);
+
+            var itemId = obs.GetSceneItemId(
+                _config.PauseSceneName,
+                _config.PauseImageSourceName,
+                0
+            );
+            obs.SetSceneItemEnabled(_config.PauseSceneName, itemId, true);
         }
         catch (Exception ex)
         {
