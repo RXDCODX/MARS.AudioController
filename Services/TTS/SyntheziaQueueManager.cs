@@ -46,6 +46,7 @@ public class SyntheziaQueueManager(
         configuration.GetSection("Tts:VoiceStyles").Get<List<string>>() ?? [];
     private readonly IReadOnlyList<string> _availableSystemVoices =
         systemSpeechTtsPlaybackService.GetInstalledVoices();
+    private string? _lastUserTwitchId;
 
     public Task EnqueueAsync(TwitchUser user, string message)
     {
@@ -106,8 +107,10 @@ public class SyntheziaQueueManager(
                         await PlayByAssignmentAsync(assignment, greeting, stoppingToken);
                     }
 
-                    // Play the actual message
-                    var speechText = BuildSpeechText(queued.User, queued.Message);
+                    var isConsecutive = queued.User.TwitchId == _lastUserTwitchId;
+                    _lastUserTwitchId = queued.User.TwitchId;
+
+                    var speechText = BuildSpeechText(queued.User, queued.Message, !isConsecutive);
                     await PlayByAssignmentAsync(assignment, speechText, stoppingToken);
                 }
                 catch (Exception ex)
@@ -220,15 +223,21 @@ public class SyntheziaQueueManager(
         return _voiceDisplayNames.GetValueOrDefault(file, file);
     }
 
-    private static string BuildSpeechText(TwitchUser user, string message)
+    internal static string BuildSpeechText(TwitchUser user, string message, bool includePrefix)
     {
-        var userName = string.IsNullOrWhiteSpace(user.DisplayName)
-            ? user.UserLogin
-            : user.DisplayName;
+        var result = message;
 
-        var result = string.IsNullOrWhiteSpace(userName)
-            ? message
-            : $"{userName} пишет: {message}";
+        if (includePrefix)
+        {
+            var userName = string.IsNullOrWhiteSpace(user.DisplayName)
+                ? user.UserLogin
+                : user.DisplayName;
+
+            if (!string.IsNullOrWhiteSpace(userName))
+            {
+                result = $"{userName} пишет: {message}";
+            }
+        }
 
         result = Helper.NormalizeSpeechText(result);
 
