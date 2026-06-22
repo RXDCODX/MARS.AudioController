@@ -89,6 +89,19 @@ public class TtsHubClientHostedService(
                 await queueManager.ApplyStateAsync(state);
             }
         );
+
+        connection.On<string>(
+            nameof(IVoiceRecognitionHub.ReassignVoice),
+            async userId =>
+            {
+                if (string.IsNullOrWhiteSpace(userId))
+                {
+                    return;
+                }
+
+                await queueManager.ReassignUserVoiceAsync(userId);
+            }
+        );
     }
 
     private async Task StartConnectionAsync(CancellationToken stoppingToken)

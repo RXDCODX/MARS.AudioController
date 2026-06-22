@@ -10,6 +10,8 @@ public interface ISyntheziaQueueManager
     Task EnqueueAsync(TwitchUser user, string message);
 
     Task ApplyStateAsync(TtsState state);
+
+    Task ReassignUserVoiceAsync(string userId);
 }
 
 [SupportedOSPlatform("windows")]
@@ -78,6 +80,37 @@ public class SyntheziaQueueManager(
         }
 
         return Task.CompletedTask;
+    }
+
+    public async Task ReassignUserVoiceAsync(string userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        var availableBindings = BuildAvailableBindings();
+        var fallback = new VoiceAssignment(VoiceEngine.Onnx, "assets/voice_styles/M1.json");
+
+        var newVoice = availableBindings.Count == 0
+            ? fallback
+            : availableBindings[Random.Shared.Next(availableBindings.Count)];
+
+        lock (_voicesGate)
+        {
+            _linkedVoices[userId] = newVoice;
+        }
+
+        var displayName = GetVoiceDisplayName(newVoice);
+        var greeting = $"Твой голос изменен на {displayName}";
+        await PlayByAssignmentAsync(newVoice, greeting, CancellationToken.None);
+
+        logger.LogInformation(
+            "Voice reassigned for user {UserId} to {VoiceDisplayName} ({VoiceId})",
+            userId,
+            displayName,
+            newVoice.VoiceId
+        );
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

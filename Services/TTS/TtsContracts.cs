@@ -5,6 +5,8 @@ public interface IVoiceRecognitionHub
     Task PlayTts(TwitchUser user, string message);
 
     Task UpdateTtsState(TtsState state);
+
+    Task ReassignVoice(string userId);
 }
 
 public class TtsState
