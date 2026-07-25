@@ -6,19 +6,25 @@ using OBSWebsocketDotNet;
 
 namespace MARS.AudioController;
 
-internal class Program
+public class Program
 {
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddSingleton<AudioControllerService>();
         builder.Services.AddSingleton<TtsPlaybackStateService>();
         builder.Services.AddSingleton<TtsPlaybackService>();
-        if (OperatingSystem.IsWindows())
-        {
-            RegisterWindowsTtsServices(builder.Services);
-        }
+        builder.Services.AddSingleton<SystemSpeechTtsPlaybackService>();
+        builder.Services.AddSingleton<TtsHubConnectionHolder>();
+        builder.Services.AddSingleton<ITtsHubConnectionHolder>(sp =>
+            sp.GetRequiredService<TtsHubConnectionHolder>()
+        );
+        builder.Services.AddSingleton<SyntheziaQueueManager>();
+        builder.Services.AddSingleton<ISyntheziaQueueManager>(sp =>
+            sp.GetRequiredService<SyntheziaQueueManager>()
+        );
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<SyntheziaQueueManager>());
         builder.Services.AddSingleton<TtsHubClientHostedService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<TtsHubClientHostedService>());
         builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
@@ -44,17 +50,6 @@ internal class Program
 
         app.MapGet("/", () => "Audio Controller REST Server is running!");
 
-        app.Run();
-    }
-
-    [SupportedOSPlatform("windows")]
-    private static void RegisterWindowsTtsServices(IServiceCollection services)
-    {
-        services.AddSingleton<SystemSpeechTtsPlaybackService>();
-        services.AddSingleton<SyntheziaQueueManager>();
-        services.AddSingleton<ISyntheziaQueueManager>(sp =>
-            sp.GetRequiredService<SyntheziaQueueManager>()
-        );
-        services.AddHostedService(sp => sp.GetRequiredService<SyntheziaQueueManager>());
+        await app.RunAsync();
     }
 }

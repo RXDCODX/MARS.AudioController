@@ -3,7 +3,9 @@ using System.IO;
 using System.Runtime.Versioning;
 using MARS.AudioController.Models;
 using Microsoft.AspNetCore.SignalR.Client;
+using NAudio.Dsp;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 
 namespace MARS.AudioController.Services.TTS;
 
@@ -21,7 +23,7 @@ public class SyntheziaQueueManager(
     TtsPlaybackService ttsPlaybackService,
     SystemSpeechTtsPlaybackService systemSpeechTtsPlaybackService,
     TtsPlaybackStateService playbackState,
-    TtsHubClientHostedService hubClient,
+    ITtsHubConnectionHolder hubConnectionHolder,
     IConfiguration configuration,
     ILogger<SyntheziaQueueManager> logger
 ) : BackgroundService, ISyntheziaQueueManager
@@ -95,9 +97,10 @@ public class SyntheziaQueueManager(
         var availableBindings = BuildAvailableBindings();
         var fallback = new VoiceAssignment(VoiceEngine.Onnx, "assets/voice_styles/M1.json");
 
-        var newVoice = availableBindings.Count == 0
-            ? fallback
-            : availableBindings[Random.Shared.Next(availableBindings.Count)];
+        var newVoice =
+            availableBindings.Count == 0
+                ? fallback
+                : availableBindings[Random.Shared.Next(availableBindings.Count)];
 
         lock (_voicesGate)
         {
@@ -118,47 +121,59 @@ public class SyntheziaQueueManager(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            await _signal.WaitAsync(stoppingToken);
-
-            if (playbackState.IsStopped)
+        await Task.Factory.StartNew(
+            async () =>
             {
-                while (_queue.TryDequeue(out _)) { }
-
-                continue;
-            }
-
-            if (_queue.TryDequeue(out var queued))
-            {
-                try
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    var (assignment, isNew) = ResolveOrAssignVoice(queued.User.TwitchId);
+                    await _signal.WaitAsync(stoppingToken);
 
-                    if (isNew)
+                    if (playbackState.IsStopped)
                     {
-                        var displayName = GetVoiceDisplayName(assignment);
-                        var greeting =
-                            $"Привет, {queued.User.DisplayName}! Для тебя был выбран голос {displayName}";
-                        await PlayByAssignmentAsync(assignment, greeting, stoppingToken);
+                        while (_queue.TryDequeue(out _)) { }
+
+                        continue;
                     }
 
-                    var isConsecutive = queued.User.TwitchId == _lastUserTwitchId;
-                    _lastUserTwitchId = queued.User.TwitchId;
+                    if (_queue.TryDequeue(out var queued))
+                    {
+                        try
+                        {
+                            var (assignment, isNew) = ResolveOrAssignVoice(queued.User.TwitchId);
 
-                    var speechText = BuildSpeechText(queued.User, queued.Message, !isConsecutive);
-                    await PlayByAssignmentAsync(assignment, speechText, stoppingToken);
+                            if (isNew)
+                            {
+                                var displayName = GetVoiceDisplayName(assignment);
+                                var greeting =
+                                    $"Привет, {queued.User.DisplayName}! Для тебя был выбран голос {displayName}";
+                                await PlayByAssignmentAsync(assignment, greeting, stoppingToken);
+                            }
+
+                            var isConsecutive = queued.User.TwitchId == _lastUserTwitchId;
+                            _lastUserTwitchId = queued.User.TwitchId;
+
+                            var speechText = BuildSpeechText(
+                                queued.User,
+                                queued.Message,
+                                !isConsecutive
+                            );
+                            await PlayByAssignmentAsync(assignment, speechText, stoppingToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError(
+                                ex,
+                                "Failed to play queued TTS message for {User}",
+                                queued.User.DisplayName
+                            );
+                        }
+                    }
                 }
-                catch (Exception ex)
-                {
-                    logger.LogError(
-                        ex,
-                        "Failed to play queued TTS message for {User}",
-                        queued.User.DisplayName
-                    );
-                }
-            }
-        }
+            },
+            stoppingToken,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
     }
 
     private (VoiceAssignment Assignment, bool IsNew) ResolveOrAssignVoice(string userKey)
@@ -299,18 +314,35 @@ public class SyntheziaQueueManager(
                 }
             }
 
-            if (pcmAudio is { Length: > 0 } && hubClient.Connection is { State: HubConnectionState.Connected })
+            if (
+                pcmAudio is { Length: > 0 }
+                && hubConnectionHolder.Connection is { State: HubConnectionState.Connected }
+            )
             {
-                await hubClient.Connection.InvokeAsync(
+                const int targetSampleRate = 48000;
+                const int targetChannels = 2;
+
+                if (sampleRate != targetSampleRate)
+                {
+                    pcmAudio = ResamplePcm16(pcmAudio, sampleRate, targetSampleRate);
+                    sampleRate = targetSampleRate;
+                }
+
+                await hubConnectionHolder.Connection.InvokeAsync(
                     "SubmitAudioForRelay",
                     pcmAudio,
                     sampleRate,
-                    channels,
+                    targetChannels,
                     text,
                     cancellationToken: cancellationToken
                 );
 
-                logger.LogInformation("Sent audio to Discord relay: {Text}, {Size} bytes", text, pcmAudio.Length);
+                logger.LogInformation(
+                    "Sent audio to Discord relay: {Text}, {Size} bytes, {SampleRate}Hz",
+                    text,
+                    pcmAudio.Length,
+                    sampleRate
+                );
             }
         }
         catch (Exception ex)
@@ -328,6 +360,44 @@ public class SyntheziaQueueManager(
         using var pcmStream = new MemoryStream();
         reader.CopyTo(pcmStream);
         return (pcmStream.ToArray(), sampleRate);
+    }
+
+    private static byte[] ResamplePcm16(
+        byte[] pcmData,
+        int sourceSampleRate,
+        int targetSampleRate,
+        bool convertToStereo = true
+    )
+    {
+        var sourceFormat = new WaveFormat(sourceSampleRate, 16, 1);
+        using var sourceStream = new RawSourceWaveStream(
+            new MemoryStream(pcmData, writable: false),
+            sourceFormat
+        );
+
+        var sampleProvider = sourceStream.ToSampleProvider();
+        ISampleProvider resampler = new WdlResamplingSampleProvider(sampleProvider, targetSampleRate);
+
+        if (convertToStereo)
+        {
+            resampler = new MonoToStereoSampleProvider(resampler);
+        }
+
+        using var outputStream = new MemoryStream();
+        var buffer = new float[4096];
+        int samplesRead;
+        while ((samplesRead = resampler.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            for (var i = 0; i < samplesRead; i++)
+            {
+                var sample = Math.Clamp(buffer[i], -1.0f, 1.0f);
+                var intSample = (short)(sample * short.MaxValue);
+                outputStream.WriteByte((byte)(intSample & 0xFF));
+                outputStream.WriteByte((byte)((intSample >> 8) & 0xFF));
+            }
+        }
+
+        return outputStream.ToArray();
     }
 
     private string GetVoiceDisplayName(VoiceAssignment assignment)
