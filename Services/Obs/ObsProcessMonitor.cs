@@ -4,80 +4,74 @@ using Microsoft.Extensions.Logging;
 
 namespace MARS.AudioController.Services.Obs;
 
-public class ObsProcessMonitor : BackgroundService, IObsProcessMonitor
+public class ObsProcessMonitor(
+    IObsService obsService,
+    ILogger<ObsProcessMonitor> logger,
+    Func<bool>? processCheck = null,
+    TimeSpan? pollInterval = null
+) : BackgroundService, IObsProcessMonitor
 {
-    private static readonly string[] ObsProcessNames = [
-        "obs64",
-        "obs64debug",
-        "obs-browser-page",
-    ];
+    private static readonly string[] ObsProcessNames = ["obs64", "obs64debug", "obs-browser-page"];
 
-    private readonly IObsService _obsService;
-    private readonly ILogger<ObsProcessMonitor> _logger;
-    private readonly Func<bool> _processCheck;
-    private readonly TimeSpan _pollInterval;
+    private readonly Func<bool> _processCheck = processCheck ?? DefaultProcessCheck;
+    private readonly TimeSpan _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
 
     public bool IsObsProcessRunning => _processCheck();
 
     public ObsProcessMonitor(IObsService obsService, ILogger<ObsProcessMonitor> logger)
         : this(obsService, logger, null, null) { }
 
-    public ObsProcessMonitor(
-        IObsService obsService,
-        ILogger<ObsProcessMonitor> logger,
-        Func<bool>? processCheck = null,
-        TimeSpan? pollInterval = null
-    )
-    {
-        _obsService = obsService;
-        _logger = logger;
-        _processCheck = processCheck ?? DefaultProcessCheck;
-        _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
-    }
-
     private static bool DefaultProcessCheck() =>
         ObsProcessNames.Any(name => Process.GetProcessesByName(name).Length > 0);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("OBS process monitor started");
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
+        await Task.Factory.StartNew(
+            async () =>
             {
-                var processRunning = _processCheck();
+                logger.LogInformation("OBS process monitor started");
 
-                if (processRunning && !_obsService.IsConnected)
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    _logger.LogInformation(
-                        "OBS process detected — attempting to connect to WebSocket"
-                    );
-
                     try
                     {
-                        await _obsService.ConnectAsync(stoppingToken);
+                        var processRunning = _processCheck();
+
+                        if (processRunning && !obsService.IsConnected)
+                        {
+                            logger.LogInformation(
+                                "OBS process detected — attempting to connect to WebSocket"
+                            );
+
+                            try
+                            {
+                                await obsService.ConnectAsync(stoppingToken);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogWarning(ex, "Failed to connect to OBS WebSocket");
+                            }
+                        }
+                        else if (!processRunning && obsService.IsConnected)
+                        {
+                            logger.LogInformation(
+                                "No OBS process detected — disconnecting from WebSocket"
+                            );
+
+                            obsService.DisconnectAsync();
+                        }
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        _logger.LogWarning(ex, "Failed to connect to OBS WebSocket");
+                        logger.LogWarning(ex, "Error in OBS process monitor loop");
                     }
-                }
-                else if (!processRunning && _obsService.IsConnected)
-                {
-                    _logger.LogInformation(
-                        "No OBS process detected — disconnecting from WebSocket"
-                    );
 
-                    _obsService.DisconnectAsync();
+                    await Task.Delay(_pollInterval, stoppingToken);
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Error in OBS process monitor loop");
-            }
-
-            await Task.Delay(_pollInterval, stoppingToken);
-        }
+            },
+            stoppingToken,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
     }
 }
