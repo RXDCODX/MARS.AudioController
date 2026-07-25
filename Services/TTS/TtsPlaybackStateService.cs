@@ -12,6 +12,8 @@ public class TtsPlaybackStateService
 
     public double Volume { get; private set; } = 1.0;
 
+    public bool RelayToDiscord { get; private set; }
+
     public CancellationToken PlaybackCancellationToken
     {
         get
@@ -33,6 +35,7 @@ public class TtsPlaybackStateService
         lock (_gate)
         {
             Volume = Math.Clamp(state.Volume, 0.0, 2.0);
+            RelayToDiscord = state.RelayToDiscord;
 
             if (state.IsStopped)
             {

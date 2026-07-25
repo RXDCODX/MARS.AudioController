@@ -18,6 +18,8 @@ public class TtsHubClientHostedService(
     private string _hubUrl = DefaultHubUrl;
     private HubConnection? _connection;
 
+    public HubConnection? Connection => _connection;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _hubUrl = configuration["TtsHub:Url"] ?? DefaultHubUrl;

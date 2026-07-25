@@ -19,7 +19,8 @@ internal class Program
         {
             RegisterWindowsTtsServices(builder.Services);
         }
-        builder.Services.AddHostedService<TtsHubClientHostedService>();
+        builder.Services.AddSingleton<TtsHubClientHostedService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<TtsHubClientHostedService>());
         builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
 
         // Register audio playback queue service

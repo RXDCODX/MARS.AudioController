@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.Versioning;
 using MARS.AudioController.Models;
+using Microsoft.AspNetCore.SignalR.Client;
+using NAudio.Wave;
 
 namespace MARS.AudioController.Services.TTS;
 
@@ -19,6 +21,7 @@ public class SyntheziaQueueManager(
     TtsPlaybackService ttsPlaybackService,
     SystemSpeechTtsPlaybackService systemSpeechTtsPlaybackService,
     TtsPlaybackStateService playbackState,
+    TtsHubClientHostedService hubClient,
     IConfiguration configuration,
     ILogger<SyntheziaQueueManager> logger
 ) : BackgroundService, ISyntheziaQueueManager
@@ -211,6 +214,22 @@ public class SyntheziaQueueManager(
         CancellationToken cancellationToken
     )
     {
+        if (playbackState.RelayToDiscord)
+        {
+            await SendToDiscordRelayAsync(assignment, text, cancellationToken);
+        }
+        else
+        {
+            await PlayLocallyAsync(assignment, text, cancellationToken);
+        }
+    }
+
+    private async Task PlayLocallyAsync(
+        VoiceAssignment assignment,
+        string text,
+        CancellationToken cancellationToken
+    )
+    {
         if (assignment.Engine == VoiceEngine.WinApi)
         {
             await systemSpeechTtsPlaybackService.PlayAsync(
@@ -233,6 +252,82 @@ public class SyntheziaQueueManager(
                 cancellationToken
             );
         }
+    }
+
+    private async Task SendToDiscordRelayAsync(
+        VoiceAssignment assignment,
+        string text,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            byte[]? pcmAudio = null;
+            int sampleRate = 48000;
+            const int channels = 2;
+
+            if (assignment.Engine == VoiceEngine.WinApi)
+            {
+                var wavBytes = await systemSpeechTtsPlaybackService.GenerateSpeechWavAsync(
+                    text,
+                    assignment.VoiceId,
+                    cancellationToken
+                );
+
+                if (wavBytes.Length > 0)
+                {
+                    (pcmAudio, sampleRate) = ExtractPcmFromWav(wavBytes);
+                }
+            }
+            else
+            {
+                var result = await ttsPlaybackService.GeneratePcmAsync(
+                    new TtsPlaybackRequest
+                    {
+                        Text = text,
+                        VoiceStylePath = assignment.VoiceId,
+                        Volume = playbackState.Volume,
+                        Language = "na",
+                    },
+                    cancellationToken
+                );
+
+                if (result is not null)
+                {
+                    pcmAudio = result.Value.Pcm;
+                    sampleRate = result.Value.SampleRate;
+                }
+            }
+
+            if (pcmAudio is { Length: > 0 } && hubClient.Connection is { State: HubConnectionState.Connected })
+            {
+                await hubClient.Connection.InvokeAsync(
+                    "SubmitAudioForRelay",
+                    pcmAudio,
+                    sampleRate,
+                    channels,
+                    text,
+                    cancellationToken: cancellationToken
+                );
+
+                logger.LogInformation("Sent audio to Discord relay: {Text}, {Size} bytes", text, pcmAudio.Length);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to send audio to Discord relay");
+        }
+    }
+
+    private static (byte[] Pcm, int SampleRate) ExtractPcmFromWav(byte[] wavBytes)
+    {
+        using var memoryStream = new MemoryStream(wavBytes, writable: false);
+        using var reader = new WaveFileReader(memoryStream);
+
+        var sampleRate = reader.WaveFormat.SampleRate;
+        using var pcmStream = new MemoryStream();
+        reader.CopyTo(pcmStream);
+        return (pcmStream.ToArray(), sampleRate);
     }
 
     private string GetVoiceDisplayName(VoiceAssignment assignment)

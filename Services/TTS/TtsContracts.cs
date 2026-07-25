@@ -7,6 +7,8 @@ public interface IVoiceRecognitionHub
     Task UpdateTtsState(TtsState state);
 
     Task ReassignVoice(string userId);
+
+    Task SubmitAudioForRelay(byte[] pcmAudio, int sampleRate, int channels, string text);
 }
 
 public class TtsState
@@ -14,6 +16,8 @@ public class TtsState
     public bool IsStopped { get; set; }
 
     public double Volume { get; set; }
+
+    public bool RelayToDiscord { get; set; }
 }
 
 public class TwitchUser

@@ -132,6 +132,48 @@ public class TtsPlaybackService(
         return result;
     }
 
+    public async Task<(byte[] Pcm, int SampleRate)?> GeneratePcmAsync(
+        TtsPlaybackRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Text) || string.IsNullOrWhiteSpace(request.Language))
+        {
+            return null;
+        }
+
+        try
+        {
+            var resolvedOnnxDir = ResolvePath(request.OnnxDir, "assets/onnx");
+            var resolvedVoiceStylePath = ResolvePath(request.VoiceStylePath, "assets/voice_styles/M1.json");
+
+            if (!Directory.Exists(resolvedOnnxDir) || !File.Exists(resolvedVoiceStylePath))
+            {
+                return null;
+            }
+
+            var textToSpeech = GetTextToSpeech(resolvedOnnxDir, request.UseGpu);
+            var style = GetVoiceStyle(resolvedVoiceStylePath);
+
+            var (wav, _) = textToSpeech.Call(
+                request.Text,
+                request.Language,
+                style,
+                request.TotalStep,
+                request.Speed,
+                request.SilenceDuration
+            );
+
+            var pcmBytes = ConvertToPcm16(wav);
+            return (pcmBytes, textToSpeech.SampleRate);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to generate TTS PCM");
+            return null;
+        }
+    }
+
     private TextToSpeech GetTextToSpeech(string onnxDir, bool useGpu)
     {
         var cacheKey = $"{onnxDir}|{useGpu}";
