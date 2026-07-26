@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using MARS.AudioController.Services;
+using MARS.AudioController.Services.AudioControllerHub;
 using MARS.AudioController.Services.Obs;
 using MARS.AudioController.Services.TTS;
 using OBSWebsocketDotNet;
@@ -25,8 +26,10 @@ public class Program
             sp.GetRequiredService<SyntheziaQueueManager>()
         );
         builder.Services.AddHostedService(sp => sp.GetRequiredService<SyntheziaQueueManager>());
-        builder.Services.AddSingleton<TtsHubClientHostedService>();
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<TtsHubClientHostedService>());
+        builder.Services.AddSingleton<AudioControllerHubClientHostedService>();
+        builder.Services.AddHostedService(sp =>
+            sp.GetRequiredService<AudioControllerHubClientHostedService>()
+        );
         builder.Services.AddHostedService<MicrophoneVolumeMonitorService>();
 
         // Register audio playback queue service
