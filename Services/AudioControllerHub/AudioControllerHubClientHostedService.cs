@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MARS.AudioController.Services.Obs;
 using MARS.AudioController.Services.TTS;
+using MARS.AudioController.Services.WaifuChat;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -21,6 +22,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
     private readonly IObsService _obsService;
     private readonly ISyntheziaQueueManager _queueManager;
     private readonly ITtsHubConnectionHolder _hubConnectionHolder;
+    private readonly WaifuLlmService? _waifuLlmService;
     private readonly ILogger<AudioControllerHubClientHostedService> _logger;
 
     public HubConnection? Connection { get; private set; }
@@ -31,7 +33,8 @@ public class AudioControllerHubClientHostedService : BackgroundService
         IObsService obsService,
         ISyntheziaQueueManager queueManager,
         ITtsHubConnectionHolder hubConnectionHolder,
-        ILogger<AudioControllerHubClientHostedService> logger
+        ILogger<AudioControllerHubClientHostedService> logger,
+        WaifuLlmService? waifuLlmService = null
     )
     {
         _configuration = configuration;
@@ -40,6 +43,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         _queueManager = queueManager;
         _hubConnectionHolder = hubConnectionHolder;
         _logger = logger;
+        _waifuLlmService = waifuLlmService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -310,6 +314,35 @@ public class AudioControllerHubClientHostedService : BackgroundService
                 if (!string.IsNullOrWhiteSpace(userId))
                 {
                     await _queueManager.ReassignUserVoiceAsync(userId);
+                }
+            }
+        );
+
+        // ── WaifuChat ──
+        connection.On<string, string, string, string?, string>(
+            "WaifuChatMessage",
+            async (correlationId, twitchId, displayName, waifuName, message) =>
+            {
+                if (_waifuLlmService is null)
+                {
+                    _logger.LogWarning("WaifuChatMessage received but WaifuLlmService is not initialized");
+                    return;
+                }
+
+                try
+                {
+                    var response = await _waifuLlmService.GenerateResponseAsync(
+                        twitchId, displayName, waifuName ?? "жена", message);
+
+                    if (!string.IsNullOrWhiteSpace(response) && Connection?.State == HubConnectionState.Connected)
+                    {
+                        await Connection.InvokeAsync(
+                            "WaifuChatResponse", correlationId, twitchId, response);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to process WaifuChatMessage for {TwitchId}", twitchId);
                 }
             }
         );

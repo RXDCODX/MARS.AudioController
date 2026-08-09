@@ -42,6 +42,12 @@ public interface IAudioControllerHubClient
 
     Task ReassignVoice(string userId);
 
+    // ── WaifuChat ──
+
+    Task WaifuChatMessage(
+        string correlationId, string twitchId, string displayName,
+        string? waifuName, string message);
+
     // ── Health ──
 
     Task Ping(string correlationId);

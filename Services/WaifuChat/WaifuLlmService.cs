@@ -1,0 +1,246 @@
+using System.Collections.Concurrent;
+using System.Text;
+using LMKit.Data;
+using LMKit.Data.Storage;
+using LMKit.Model;
+using LMKit.Retrieval;
+using LMKit.TextGeneration;
+using LMKit.TextGeneration.Chat;
+using LMKit.TextGeneration.Sampling;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace MARS.AudioController.Services.WaifuChat;
+
+public class WaifuLlmService : IWaifuLlmService, IDisposable
+{
+    private readonly LM _chatModel;
+    private readonly LM _embedModel;
+    private readonly WaifuChatOptions _options;
+    private readonly ILogger<WaifuLlmService> _logger;
+    private readonly ConcurrentDictionary<string, RagChat> _viewerChats = new();
+    private readonly ConcurrentDictionary<string, DateTime> _lastActivity = new();
+    private readonly CooldownTracker _cooldownTracker;
+    private readonly SemaphoreSlim _inferenceLock = new(1, 1);
+
+    private const string SystemPromptTemplate =
+        """
+        Ты — {waifuName}, жена {displayName}. Ты общаешься с ним в Twitch чате.
+        Ты любящая, заботливая и немного ревнивая жена. Говори коротко (до 2-3 предложений).
+        Помни что обсуждала ранее с мужем. Упоминай детали из прошлых разговоров.
+        Отвечай на русском языке. Будь игривой и ласковой.
+        Не используй эмодзи.
+        """;
+
+    public WaifuLlmService(
+        IOptions<WaifuChatOptions> options,
+        ILogger<WaifuLlmService> logger)
+    {
+        _options = options.Value;
+        _logger = logger;
+        _cooldownTracker = new CooldownTracker(_options.ResponseCooldownSeconds);
+
+        _logger.LogInformation("Loading chat model: {ModelId}", _options.ChatModelId);
+        _chatModel = LM.LoadFromModelID(_options.ChatModelId);
+
+        _logger.LogInformation("Loading embedding model: {ModelId}", _options.EmbedModelId);
+        _embedModel = LM.LoadFromModelID(_options.EmbedModelId);
+
+        _logger.LogInformation("LLM models loaded successfully");
+    }
+
+    public async Task<string?> GenerateResponseAsync(
+        string twitchId,
+        string displayName,
+        string waifuName,
+        string userMessage,
+        CancellationToken ct = default)
+    {
+        if (!_options.Enabled)
+        {
+            return null;
+        }
+
+        if (_cooldownTracker.IsOnCooldown(twitchId))
+        {
+            _logger.LogDebug("Viewer {TwitchId} is on cooldown", twitchId);
+            return null;
+        }
+
+        await _inferenceLock.WaitAsync(ct);
+        try
+        {
+            EvictStaleSessions();
+
+            var chat = _viewerChats.GetOrAdd(twitchId, id =>
+            {
+                var storePath = Path.Combine(_options.DataPath, id);
+                var store = new FileSystemVectorStore(storePath);
+                var ragEngine = new RagEngine(_embedModel, store);
+
+                return new RagChat(ragEngine, _chatModel)
+                {
+                    MaxRetrievedPartitions = 5,
+                    MinRelevanceScore = 0.3f,
+                    SystemPrompt = BuildSystemPrompt(waifuName, displayName),
+                };
+            });
+
+            _lastActivity[twitchId] = DateTime.UtcNow;
+
+            _logger.LogInformation(
+                "Generating response for {TwitchId} ({DisplayName}) as {WaifuName}",
+                twitchId, displayName, waifuName);
+
+            var result = await Task.Factory.StartNew(
+                () => chat.Submit(userMessage, ct),
+                ct,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+
+            var responseText = result.Response.Completion.Trim();
+
+            _cooldownTracker.SetCooldown(twitchId);
+
+            return responseText;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate LLM response for {TwitchId}", twitchId);
+            return null;
+        }
+        finally
+        {
+            _inferenceLock.Release();
+        }
+    }
+
+    public virtual async Task ExtractAndSaveAllFactsAsync(CancellationToken ct)
+    {
+        foreach (var (twitchId, chat) in _viewerChats)
+        {
+            try
+            {
+                _logger.LogInformation("Extracting facts for {TwitchId}", twitchId);
+
+                var history = chat.ChatHistory;
+                if (history.MessageCount < 4)
+                {
+                    continue;
+                }
+
+                var factPrompt = $"""
+                    Из этого диалога извлеки факты о собеседнике (имя, хобби, предпочтения, важные детали).
+                    Верни только список фактов, по одному на строку. Если новых фактов нет — верни "нет".
+
+                    Диалог:
+                    {FormatHistory(history)}
+                    """;
+
+                var factChat = new MultiTurnConversation(_chatModel)
+                {
+                    MaximumCompletionTokens = 256,
+                    SamplingMode = new RandomSampling { Temperature = 0.3f },
+                };
+
+                var factResult = await Task.Factory.StartNew(
+                    () => factChat.Submit(factPrompt, ct),
+                    ct,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
+
+                var facts = FactsExtractor.ParseFacts(factResult.Completion);
+
+                if (facts.Count > 0)
+                {
+                    _logger.LogInformation(
+                        "Extracted {Count} facts for {TwitchId}", facts.Count, twitchId);
+                    // TODO: сохранить факты в PostgreSQL через SignalR
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract facts for {TwitchId}", twitchId);
+            }
+        }
+    }
+
+    public virtual void DisposeAllSessions()
+    {
+        foreach (var chat in _viewerChats.Values)
+        {
+            chat.Dispose();
+        }
+
+        _viewerChats.Clear();
+        _lastActivity.Clear();
+    }
+
+    private void EvictStaleSessions()
+    {
+        if (_viewerChats.Count < _options.MaxViewerSessions)
+        {
+            return;
+        }
+
+        var cutoff = DateTime.UtcNow - _options.SessionEvictionTimeout;
+        var staleKeys = _lastActivity
+            .Where(kv => kv.Value < cutoff)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var key in staleKeys)
+        {
+            if (_viewerChats.TryRemove(key, out var chat))
+            {
+                chat.Dispose();
+                _lastActivity.TryRemove(key, out _);
+            }
+        }
+
+        if (_viewerChats.Count >= _options.MaxViewerSessions)
+        {
+            var oldest = _lastActivity
+                .OrderBy(kv => kv.Value)
+                .Take(_viewerChats.Count - _options.MaxViewerSessions + 1)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            foreach (var key in oldest)
+            {
+                if (_viewerChats.TryRemove(key, out var chat))
+                {
+                    chat.Dispose();
+                    _lastActivity.TryRemove(key, out _);
+                }
+            }
+        }
+    }
+
+    private string BuildSystemPrompt(string waifuName, string displayName)
+    {
+        return SystemPromptTemplate
+            .Replace("{waifuName}", waifuName)
+            .Replace("{displayName}", displayName);
+    }
+
+    private static string FormatHistory(ChatHistory history)
+    {
+        var sb = new StringBuilder();
+        foreach (var msg in history.Messages.TakeLast(10))
+        {
+            var role = msg.AuthorRole == AuthorRole.User ? "Пользователь" : "Жена";
+            sb.AppendLine($"{role}: {msg.Text}");
+        }
+
+        return sb.ToString();
+    }
+
+    public void Dispose()
+    {
+        _inferenceLock.Dispose();
+        DisposeAllSessions();
+        _chatModel?.Dispose();
+        _embedModel?.Dispose();
+    }
+}
