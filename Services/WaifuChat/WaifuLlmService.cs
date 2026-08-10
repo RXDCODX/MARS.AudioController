@@ -53,7 +53,9 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         string displayName,
         string waifuName,
         string userMessage,
-        CancellationToken ct = default)
+        string? characterDescription,
+        CancellationToken ct = default
+    )
     {
         if (!_options.Enabled)
         {
@@ -71,7 +73,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         {
             EvictStaleSessions();
 
-            var systemPrompt = BuildSystemPrompt(waifuName, displayName);
+            var systemPrompt = BuildSystemPrompt(waifuName, displayName, characterDescription);
 
             var chat = _viewerChats.GetOrAdd(
                 twitchId,
@@ -93,18 +95,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 waifuName
             );
 
-            // Собираем только финальный ответ, фильтруя thinking-токены
             var responseBuilder = new StringBuilder();
             var hasNonReasoningTokens = false;
-
-            void OnAfterTextCompletion(object? sender, AfterTextCompletionEventArgs e)
-            {
-                if (e.SegmentType != TextSegmentType.InternalReasoning)
-                {
-                    responseBuilder.Append(e.Text);
-                    hasNonReasoningTokens = true;
-                }
-            }
 
             chat.AfterTextCompletion += OnAfterTextCompletion;
 
@@ -123,14 +115,24 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 chat.AfterTextCompletion -= OnAfterTextCompletion;
             }
 
-            // Если event handler не собрал токены — fallback на result.Completion
             var responseText = hasNonReasoningTokens
                 ? responseBuilder.ToString().Trim()
                 : result.Completion.Trim();
 
+            responseText = StripThinkingProcess(responseText);
+
             _cooldownTracker.SetCooldown(twitchId);
 
             return responseText;
+
+            void OnAfterTextCompletion(object? sender, AfterTextCompletionEventArgs e)
+            {
+                if (e.SegmentType != TextSegmentType.InternalReasoning)
+                {
+                    responseBuilder.Append(e.Text);
+                    hasNonReasoningTokens = true;
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -141,6 +143,29 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         {
             _inferenceLock.Release();
         }
+    }
+
+    public static string StripThinkingProcess(string completion)
+    {
+        if (string.IsNullOrWhiteSpace(completion))
+        {
+            return completion;
+        }
+
+        var thinkIndex = completion.IndexOf("Thinking Process:", StringComparison.OrdinalIgnoreCase);
+        if (thinkIndex < 0)
+        {
+            return completion;
+        }
+
+        var afterThink = completion[(thinkIndex + "Thinking Process:".Length)..];
+        var doubleNewline = afterThink.IndexOf("\n\n", StringComparison.Ordinal);
+        if (doubleNewline >= 0)
+        {
+            return afterThink[(doubleNewline + 2)..].TrimStart();
+        }
+
+        return afterThink.TrimStart();
     }
 
     public virtual async Task ExtractAndSaveAllFactsAsync(CancellationToken ct)
@@ -197,11 +222,24 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         }
     }
 
-    private string BuildSystemPrompt(string waifuName, string displayName)
+    private string BuildSystemPrompt(string waifuName, string displayName, string? characterDescription)
     {
-        return SystemPromptTemplate
+        var prompt = SystemPromptTemplate
             .Replace("{waifuName}", waifuName)
             .Replace("{displayName}", displayName);
+
+        if (!string.IsNullOrWhiteSpace(characterDescription))
+        {
+            prompt += $"\n\n## Твой характер (из аниме):\n{characterDescription}";
+        }
+
+        var now = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.UtcNow,
+            TimeZoneInfo.FindSystemTimeZoneById("Russian Standard Time"));
+
+        prompt += $"\n\nТекущая дата и время: {now:dd.MM.yyyy, dddd, HH:mm} (МСК).";
+
+        return prompt;
     }
 
     public void Dispose()

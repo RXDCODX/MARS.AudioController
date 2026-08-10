@@ -7,6 +7,7 @@ public interface IWaifuLlmService
         string displayName,
         string waifuName,
         string userMessage,
+        string? characterDescription,
         CancellationToken ct = default);
 
     Task ExtractAndSaveAllFactsAsync(CancellationToken ct);
