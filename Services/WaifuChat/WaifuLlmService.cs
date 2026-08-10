@@ -5,6 +5,7 @@ using LMKit.Data.Storage;
 using LMKit.Model;
 using LMKit.TextGeneration;
 using LMKit.TextGeneration.Chat;
+using LMKit.TextGeneration.Events;
 using LMKit.TextGeneration.Sampling;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -32,9 +33,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         Не используй эмодзи.
         """;
 
-    public WaifuLlmService(
-        IOptions<WaifuChatOptions> options,
-        ILogger<WaifuLlmService> logger)
+    public WaifuLlmService(IOptions<WaifuChatOptions> options, ILogger<WaifuLlmService> logger)
     {
         _options = options.Value;
         _logger = logger;
@@ -74,33 +73,55 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
             var systemPrompt = BuildSystemPrompt(waifuName, displayName);
 
-            var chat = _viewerChats.GetOrAdd(twitchId, _ =>
-            {
-                return new MultiTurnConversation(_chatModel)
+            var chat = _viewerChats.GetOrAdd(
+                twitchId,
+                _ => new MultiTurnConversation(_chatModel)
                 {
                     MaximumCompletionTokens = _options.MaxTokens,
-                    SamplingMode = new RandomSampling
-                    {
-                        Temperature = _options.Temperature,
-                    },
+                    SamplingMode = new RandomSampling { Temperature = _options.Temperature },
                     SystemPrompt = systemPrompt,
-                    ReasoningLevel = ReasoningLevel.None,
-                };
-            });
+                    ReasoningLevel = ReasoningLevel.Low,
+                }
+            );
 
             _lastActivity[twitchId] = DateTime.UtcNow;
 
             _logger.LogInformation(
                 "Generating response for {TwitchId} ({DisplayName}) as {WaifuName}",
-                twitchId, displayName, waifuName);
+                twitchId,
+                displayName,
+                waifuName
+            );
 
-            var result = await Task.Factory.StartNew(
-                () => chat.Submit(userMessage, ct),
-                ct,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default);
+            // Собираем только финальный ответ, фильтруя thinking-токены
+            var responseBuilder = new StringBuilder();
 
-            var responseText = result.Completion.Trim();
+            void OnAfterTextCompletion(object? sender, AfterTextCompletionEventArgs e)
+            {
+                // Пропускаем InternalReasoning (thinking process) — показываем только финальный ответ
+                if (e.SegmentType != TextSegmentType.InternalReasoning)
+                {
+                    responseBuilder.Append(e.Text);
+                }
+            }
+
+            chat.AfterTextCompletion += OnAfterTextCompletion;
+
+            try
+            {
+                await Task.Factory.StartNew(
+                    () => chat.Submit(userMessage, ct),
+                    ct,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default
+                );
+            }
+            finally
+            {
+                chat.AfterTextCompletion -= OnAfterTextCompletion;
+            }
+
+            var responseText = responseBuilder.ToString().Trim();
 
             _cooldownTracker.SetCooldown(twitchId);
 
@@ -119,7 +140,6 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
     public virtual async Task ExtractAndSaveAllFactsAsync(CancellationToken ct)
     {
-        // Fact extraction will be implemented when RAG persistence is added
         await Task.CompletedTask;
     }
 
@@ -142,10 +162,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         }
 
         var cutoff = DateTime.UtcNow - _options.SessionEvictionTimeout;
-        var staleKeys = _lastActivity
-            .Where(kv => kv.Value < cutoff)
-            .Select(kv => kv.Key)
-            .ToList();
+        var staleKeys = _lastActivity.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList();
 
         foreach (var key in staleKeys)
         {
