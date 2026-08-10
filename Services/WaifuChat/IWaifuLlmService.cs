@@ -2,13 +2,15 @@ namespace MARS.AudioController.Services.WaifuChat;
 
 public interface IWaifuLlmService
 {
-    Task<string?> GenerateResponseAsync(
+    ChatRequest EnqueueMessage(
         string twitchId,
         string displayName,
         string waifuName,
-        string userMessage,
+        string message,
         string? characterDescription,
-        CancellationToken ct = default);
+        string? messageId = null);
+
+    bool IsProcessingOrQueued(string twitchId);
 
     Task ExtractAndSaveAllFactsAsync(CancellationToken ct);
     void DisposeAllSessions();

@@ -20,9 +20,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
     private readonly ILogger<WaifuLlmService> _logger;
     private readonly ConcurrentDictionary<string, MultiTurnConversation> _viewerChats = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastActivity = new();
-    private readonly CooldownTracker _cooldownTracker;
-    private readonly SemaphoreSlim _inferenceLock = new(1, 1);
-    private readonly HttpClient _httpClient = new();
+    private readonly MessageProcessingQueue _messageQueue = new();
+    private readonly CancellationTokenSource _processingCts = new();
 
     private const string SystemPromptTemplate =
         """
@@ -37,7 +36,6 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
     {
         _options = options.Value;
         _logger = logger;
-        _cooldownTracker = new CooldownTracker(_options.ResponseCooldownSeconds);
 
         _logger.LogInformation("Loading chat model: {ModelId}", _options.ChatModelId);
         _chatModel = LM.LoadFromModelID(_options.ChatModelId);
@@ -46,37 +44,85 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         _embedModel = LM.LoadFromModelID(_options.EmbedModelId);
 
         _logger.LogInformation("LLM models loaded successfully");
+
+        _ = Task.Factory.StartNew(
+            () => ProcessQueueAsync(_processingCts.Token),
+            _processingCts.Token,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
     }
 
-    public async Task<string?> GenerateResponseAsync(
+    public ChatRequest EnqueueMessage(
         string twitchId,
         string displayName,
         string waifuName,
-        string userMessage,
+        string message,
         string? characterDescription,
-        CancellationToken ct = default
-    )
+        string? messageId = null)
     {
-        if (!_options.Enabled)
+        var request = new ChatRequest
         {
-            return null;
-        }
+            TwitchId = twitchId,
+            DisplayName = displayName,
+            WaifuName = waifuName,
+            Message = message,
+            CharacterDescription = characterDescription,
+            MessageId = messageId,
+        };
 
-        if (_cooldownTracker.IsOnCooldown(twitchId))
+        _messageQueue.Enqueue(request);
+        _lastActivity[twitchId] = DateTime.UtcNow;
+
+        _logger.LogInformation(
+            "Enqueued message for {TwitchId} ({DisplayName}) as {WaifuName}",
+            twitchId, displayName, waifuName);
+
+        return request;
+    }
+
+    public bool IsProcessingOrQueued(string twitchId)
+    {
+        return _messageQueue.IsProcessingOrQueued(twitchId);
+    }
+
+    private async Task ProcessQueueAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
         {
-            _logger.LogDebug("Viewer {TwitchId} is on cooldown", twitchId);
-            return null;
+            try
+            {
+                if (_messageQueue.TryDequeue(out var request))
+                {
+                    await ProcessMessageAsync(request, ct);
+                }
+                else
+                {
+                    await Task.Delay(50, ct);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing queue");
+                await Task.Delay(1000, ct);
+            }
         }
+    }
 
-        await _inferenceLock.WaitAsync(ct);
+    private async Task ProcessMessageAsync(ChatRequest request, CancellationToken ct)
+    {
         try
         {
             EvictStaleSessions();
 
-            var systemPrompt = BuildSystemPrompt(waifuName, displayName, characterDescription);
+            var systemPrompt = BuildSystemPrompt(
+                request.WaifuName, request.DisplayName, request.CharacterDescription);
 
             var chat = _viewerChats.GetOrAdd(
-                twitchId,
+                request.TwitchId,
                 _ => new MultiTurnConversation(_chatModel)
                 {
                     MaximumCompletionTokens = _options.MaxTokens,
@@ -86,14 +132,11 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 }
             );
 
-            _lastActivity[twitchId] = DateTime.UtcNow;
+            _lastActivity[request.TwitchId] = DateTime.UtcNow;
 
             _logger.LogInformation(
                 "Generating response for {TwitchId} ({DisplayName}) as {WaifuName}",
-                twitchId,
-                displayName,
-                waifuName
-            );
+                request.TwitchId, request.DisplayName, request.WaifuName);
 
             var responseBuilder = new StringBuilder();
             var hasNonReasoningTokens = false;
@@ -104,11 +147,10 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             try
             {
                 result = await Task.Factory.StartNew(
-                    () => chat.Submit(userMessage, ct),
+                    () => chat.Submit(request.Message, ct),
                     ct,
                     TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default
-                );
+                    TaskScheduler.Default);
             }
             finally
             {
@@ -121,9 +163,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
             responseText = StripThinkingProcess(responseText);
 
-            _cooldownTracker.SetCooldown(twitchId);
-
-            return responseText;
+            _messageQueue.CompleteMessage(request, responseText);
 
             void OnAfterTextCompletion(object? sender, AfterTextCompletionEventArgs e)
             {
@@ -136,12 +176,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate LLM response for {TwitchId}", twitchId);
-            return null;
-        }
-        finally
-        {
-            _inferenceLock.Release();
+            _logger.LogError(ex, "Failed to generate LLM response for {TwitchId}", request.TwitchId);
+            _messageQueue.CompleteWithError(request, ex.Message);
         }
     }
 
@@ -244,10 +280,10 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
     public void Dispose()
     {
-        _inferenceLock.Dispose();
+        _processingCts.Cancel();
+        _processingCts.Dispose();
         DisposeAllSessions();
         _chatModel?.Dispose();
         _embedModel?.Dispose();
-        _httpClient?.Dispose();
     }
 }

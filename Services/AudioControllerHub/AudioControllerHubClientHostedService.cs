@@ -337,9 +337,11 @@ public class AudioControllerHubClientHostedService : BackgroundService
 
                 try
                 {
-                    var response = await _waifuLlmService.GenerateResponseAsync(
+                    var request = _waifuLlmService.EnqueueMessage(
                         msg.TwitchId, msg.DisplayName, msg.WaifuName ?? "жена",
-                        msg.Message, msg.CharacterDescription);
+                        msg.Message, msg.CharacterDescription, msg.MessageId);
+
+                    var response = await request.TaskCompletionSource.Task;
 
                     if (!string.IsNullOrWhiteSpace(response) && Connection?.State == HubConnectionState.Connected)
                     {
