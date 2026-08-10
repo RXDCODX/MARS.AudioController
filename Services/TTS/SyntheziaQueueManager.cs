@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.Versioning;
 using MARS.AudioController.Models;
+using MARS.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
 using NAudio.Dsp;
 using NAudio.Wave;

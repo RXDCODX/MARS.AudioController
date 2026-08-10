@@ -3,7 +3,6 @@ using System.Text;
 using LMKit.Data;
 using LMKit.Data.Storage;
 using LMKit.Model;
-using LMKit.Retrieval;
 using LMKit.TextGeneration;
 using LMKit.TextGeneration.Chat;
 using LMKit.TextGeneration.Sampling;
@@ -18,10 +17,11 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
     private readonly LM _embedModel;
     private readonly WaifuChatOptions _options;
     private readonly ILogger<WaifuLlmService> _logger;
-    private readonly ConcurrentDictionary<string, RagChat> _viewerChats = new();
+    private readonly ConcurrentDictionary<string, MultiTurnConversation> _viewerChats = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastActivity = new();
     private readonly CooldownTracker _cooldownTracker;
     private readonly SemaphoreSlim _inferenceLock = new(1, 1);
+    private readonly HttpClient _httpClient = new();
 
     private const string SystemPromptTemplate =
         """
@@ -72,17 +72,18 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         {
             EvictStaleSessions();
 
-            var chat = _viewerChats.GetOrAdd(twitchId, id =>
-            {
-                var storePath = Path.Combine(_options.DataPath, id);
-                var store = new FileSystemVectorStore(storePath);
-                var ragEngine = new RagEngine(_embedModel, store);
+            var systemPrompt = BuildSystemPrompt(waifuName, displayName);
 
-                return new RagChat(ragEngine, _chatModel)
+            var chat = _viewerChats.GetOrAdd(twitchId, _ =>
+            {
+                return new MultiTurnConversation(_chatModel)
                 {
-                    MaxRetrievedPartitions = 5,
-                    MinRelevanceScore = 0.3f,
-                    SystemPrompt = BuildSystemPrompt(waifuName, displayName),
+                    MaximumCompletionTokens = _options.MaxTokens,
+                    SamplingMode = new RandomSampling
+                    {
+                        Temperature = _options.Temperature,
+                    },
+                    SystemPrompt = systemPrompt,
                 };
             });
 
@@ -98,7 +99,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default);
 
-            var responseText = result.Response.Completion.Trim();
+            var responseText = result.Completion.Trim();
 
             _cooldownTracker.SetCooldown(twitchId);
 
@@ -117,52 +118,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
     public virtual async Task ExtractAndSaveAllFactsAsync(CancellationToken ct)
     {
-        foreach (var (twitchId, chat) in _viewerChats)
-        {
-            try
-            {
-                _logger.LogInformation("Extracting facts for {TwitchId}", twitchId);
-
-                var history = chat.ChatHistory;
-                if (history.MessageCount < 4)
-                {
-                    continue;
-                }
-
-                var factPrompt = $"""
-                    Из этого диалога извлеки факты о собеседнике (имя, хобби, предпочтения, важные детали).
-                    Верни только список фактов, по одному на строку. Если новых фактов нет — верни "нет".
-
-                    Диалог:
-                    {FormatHistory(history)}
-                    """;
-
-                var factChat = new MultiTurnConversation(_chatModel)
-                {
-                    MaximumCompletionTokens = 256,
-                    SamplingMode = new RandomSampling { Temperature = 0.3f },
-                };
-
-                var factResult = await Task.Factory.StartNew(
-                    () => factChat.Submit(factPrompt, ct),
-                    ct,
-                    TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default);
-
-                var facts = FactsExtractor.ParseFacts(factResult.Completion);
-
-                if (facts.Count > 0)
-                {
-                    _logger.LogInformation(
-                        "Extracted {Count} facts for {TwitchId}", facts.Count, twitchId);
-                    // TODO: сохранить факты в PostgreSQL через SignalR
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to extract facts for {TwitchId}", twitchId);
-            }
-        }
+        // Fact extraction will be implemented when RAG persistence is added
+        await Task.CompletedTask;
     }
 
     public virtual void DisposeAllSessions()
@@ -224,23 +181,12 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             .Replace("{displayName}", displayName);
     }
 
-    private static string FormatHistory(ChatHistory history)
-    {
-        var sb = new StringBuilder();
-        foreach (var msg in history.Messages.TakeLast(10))
-        {
-            var role = msg.AuthorRole == AuthorRole.User ? "Пользователь" : "Жена";
-            sb.AppendLine($"{role}: {msg.Text}");
-        }
-
-        return sb.ToString();
-    }
-
     public void Dispose()
     {
         _inferenceLock.Dispose();
         DisposeAllSessions();
         _chatModel?.Dispose();
         _embedModel?.Dispose();
+        _httpClient?.Dispose();
     }
 }

@@ -4,11 +4,13 @@ public class WaifuChatOptions
 {
     public const string SectionName = "WaifuChat";
 
-    public string ChatModelId { get; set; } = "qwen2.5:0.5b";
+    public string ChatModelId { get; set; } = "gemma4:e2b";
 
     public string EmbedModelId { get; set; } = "embeddinggemma-300m";
 
-    public string DataPath { get; set; } = "./waifu-chat-data";
+    public string ConnectionString { get; set; } = string.Empty;
+
+    public string Schema { get; set; } = "waifu_chat";
 
     public int MaxTokens { get; set; } = 256;
 

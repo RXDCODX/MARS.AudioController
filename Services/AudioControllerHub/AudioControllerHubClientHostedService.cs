@@ -2,6 +2,9 @@ using System.Text.Json;
 using MARS.AudioController.Services.Obs;
 using MARS.AudioController.Services.TTS;
 using MARS.AudioController.Services.WaifuChat;
+using MARS.Shared.Hubs;
+using MARS.Shared.Models;
+using MARS.Shared.Models.WaifuChat;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -82,9 +85,12 @@ public class AudioControllerHubClientHostedService : BackgroundService
 
     private void RegisterHandlers(HubConnection connection)
     {
+        var hub = typeof(IAudioControllerHub);
+        var server = typeof(IAudioControllerHubServer);
+
         // ── SoundBar ──
         connection.On<string, string[]>(
-            "MuteProcesses",
+            nameof(IAudioControllerHub.MuteProcesses),
             async (correlationId, processNames) =>
             {
                 try
@@ -100,7 +106,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "UnmuteProcesses",
+            nameof(IAudioControllerHub.UnmuteProcesses),
             async (correlationId) =>
             {
                 try
@@ -116,7 +122,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "GetBagCount",
+            nameof(IAudioControllerHub.GetBagCount),
             async (correlationId) =>
             {
                 try
@@ -133,7 +139,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
 
         // ── OBS ──
         connection.On<string>(
-            "ConnectObs",
+            nameof(IAudioControllerHub.ConnectObs),
             async (correlationId) =>
             {
                 try
@@ -149,7 +155,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "DisconnectObs",
+            nameof(IAudioControllerHub.DisconnectObs),
             async (correlationId) =>
             {
                 try
@@ -165,7 +171,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string, string?>(
-            "ScreenshotObs",
+            nameof(IAudioControllerHub.ScreenshotObs),
             async (correlationId, sourceName) =>
             {
                 try
@@ -181,7 +187,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "FreezeObs",
+            nameof(IAudioControllerHub.FreezeObs),
             async (correlationId) =>
             {
                 try
@@ -197,7 +203,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "UnfreezeObs",
+            nameof(IAudioControllerHub.UnfreezeObs),
             async (correlationId) =>
             {
                 try
@@ -213,7 +219,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "SwitchToPauseScene",
+            nameof(IAudioControllerHub.SwitchToPauseScene),
             async (correlationId) =>
             {
                 try
@@ -229,7 +235,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "SwitchFromPauseScene",
+            nameof(IAudioControllerHub.SwitchFromPauseScene),
             async (correlationId) =>
             {
                 try
@@ -245,7 +251,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string, int>(
-            "TogglePauseObs",
+            nameof(IAudioControllerHub.TogglePauseObs),
             async (correlationId, mode) =>
             {
                 try
@@ -263,7 +269,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "GetObsStatus",
+            nameof(IAudioControllerHub.GetObsStatus),
             async (correlationId) =>
             {
                 try
@@ -287,9 +293,9 @@ public class AudioControllerHubClientHostedService : BackgroundService
             }
         );
 
-        // ── TTS (migrated from TtsHubClientHostedService) ──
+        // ── TTS ──
         connection.On<TwitchUser, string>(
-            "PlayTts",
+            nameof(IAudioControllerHub.PlayTts),
             async (user, message) =>
             {
                 if (!string.IsNullOrWhiteSpace(message))
@@ -300,7 +306,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<TtsState>(
-            "UpdateTtsState",
+            nameof(IAudioControllerHub.UpdateTtsState),
             async (state) =>
             {
                 await _queueManager.ApplyStateAsync(state);
@@ -308,7 +314,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         connection.On<string>(
-            "ReassignVoice",
+            nameof(IAudioControllerHub.ReassignVoice),
             async (userId) =>
             {
                 if (!string.IsNullOrWhiteSpace(userId))
@@ -319,9 +325,9 @@ public class AudioControllerHubClientHostedService : BackgroundService
         );
 
         // ── WaifuChat ──
-        connection.On<string, string, string, string?, string>(
-            "WaifuChatMessage",
-            async (correlationId, twitchId, displayName, waifuName, message) =>
+        connection.On<WaifuChatMessage>(
+            nameof(IAudioControllerHub.WaifuChatMessage),
+            async (msg) =>
             {
                 if (_waifuLlmService is null)
                 {
@@ -332,24 +338,30 @@ public class AudioControllerHubClientHostedService : BackgroundService
                 try
                 {
                     var response = await _waifuLlmService.GenerateResponseAsync(
-                        twitchId, displayName, waifuName ?? "жена", message);
+                        msg.TwitchId, msg.DisplayName, msg.WaifuName ?? "жена", msg.Message);
 
                     if (!string.IsNullOrWhiteSpace(response) && Connection?.State == HubConnectionState.Connected)
                     {
                         await Connection.InvokeAsync(
-                            "WaifuChatResponse", correlationId, twitchId, response);
+                            nameof(IAudioControllerHubServer.WaifuChatResponse),
+                            new WaifuChatResponse
+                            {
+                                CorrelationId = msg.CorrelationId,
+                                TwitchId = msg.TwitchId,
+                                Response = response,
+                            });
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to process WaifuChatMessage for {TwitchId}", twitchId);
+                    _logger.LogError(ex, "Failed to process WaifuChatMessage for {TwitchId}", msg.TwitchId);
                 }
             }
         );
 
         // ── Health ──
         connection.On<string>(
-            "Ping",
+            nameof(IAudioControllerHub.Ping),
             async (correlationId) =>
             {
                 await SendResponse(correlationId, true, "pong", null);
@@ -366,7 +378,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
     {
         if (Connection?.State == HubConnectionState.Connected)
         {
-            await Connection.InvokeAsync("CommandResponse", correlationId, success, data, error);
+            await Connection.InvokeAsync(nameof(IAudioControllerHubServer.CommandResponse), correlationId, success, data, error);
         }
     }
 
@@ -419,7 +431,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
     {
         if (Connection?.State == HubConnectionState.Connected)
         {
-            await Connection.InvokeAsync("RegisterAsAudioController", cancellationToken: ct);
+            await Connection.InvokeAsync(nameof(IAudioControllerHubServer.RegisterAsAudioController), cancellationToken: ct);
         }
     }
 
