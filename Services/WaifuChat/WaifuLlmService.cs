@@ -95,21 +95,23 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
             // Собираем только финальный ответ, фильтруя thinking-токены
             var responseBuilder = new StringBuilder();
+            var hasNonReasoningTokens = false;
 
             void OnAfterTextCompletion(object? sender, AfterTextCompletionEventArgs e)
             {
-                // Пропускаем InternalReasoning (thinking process) — показываем только финальный ответ
                 if (e.SegmentType != TextSegmentType.InternalReasoning)
                 {
                     responseBuilder.Append(e.Text);
+                    hasNonReasoningTokens = true;
                 }
             }
 
             chat.AfterTextCompletion += OnAfterTextCompletion;
 
+            TextGenerationResult result;
             try
             {
-                await Task.Factory.StartNew(
+                result = await Task.Factory.StartNew(
                     () => chat.Submit(userMessage, ct),
                     ct,
                     TaskCreationOptions.LongRunning,
@@ -121,7 +123,10 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 chat.AfterTextCompletion -= OnAfterTextCompletion;
             }
 
-            var responseText = responseBuilder.ToString().Trim();
+            // Если event handler не собрал токены — fallback на result.Completion
+            var responseText = hasNonReasoningTokens
+                ? responseBuilder.ToString().Trim()
+                : result.Completion.Trim();
 
             _cooldownTracker.SetCooldown(twitchId);
 
