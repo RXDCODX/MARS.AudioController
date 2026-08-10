@@ -84,6 +84,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                         Temperature = _options.Temperature,
                     },
                     SystemPrompt = systemPrompt,
+                    ReasoningLevel = ReasoningLevel.None,
                 };
             });
 
