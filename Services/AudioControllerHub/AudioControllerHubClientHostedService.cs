@@ -332,9 +332,14 @@ public class AudioControllerHubClientHostedService : BackgroundService
             nameof(IAudioControllerHub.WaifuChatMessage),
             async (msg) =>
             {
+                _logger.LogInformation(
+                    "[WaifuChat] Received from server: correlationId={CorrelationId}, " +
+                    "twitchId={TwitchId}, displayName={DisplayName}, message='{Message}'",
+                    msg.CorrelationId, msg.TwitchId, msg.DisplayName, msg.Message);
+
                 if (_waifuLlmService is null)
                 {
-                    _logger.LogWarning("WaifuChatMessage received but WaifuLlmService is not initialized");
+                    _logger.LogWarning("[WaifuChat] WaifuLlmService is NOT initialized — skipping");
                     return;
                 }
 
@@ -346,15 +351,15 @@ public class AudioControllerHubClientHostedService : BackgroundService
                         var classification = _classifier.Classify(msg.Message);
                         if (!classification.IsWaifuChat)
                         {
-                            _logger.LogDebug(
-                                "Message from {TwitchId} classified as {Category}, skipping",
-                                msg.TwitchId, classification.Category);
+                            _logger.LogInformation(
+                                "[WaifuChat] Classified as {Category} (gender={Gender}) — skipping",
+                                classification.Category, classification.DetectedGender ?? "null");
                             return;
                         }
 
                         _logger.LogInformation(
-                            "Message from {TwitchId} classified as waifu_chat (gender={Gender})",
-                            msg.TwitchId, classification.DetectedGender);
+                            "[WaifuChat] Classified as waifu_chat (gender={Gender}) — enqueuing",
+                            classification.DetectedGender ?? "null");
                     }
 
                     var request = _waifuLlmService.EnqueueMessage(
@@ -362,10 +367,22 @@ public class AudioControllerHubClientHostedService : BackgroundService
                         msg.Message, msg.CharacterDescription, msg.MessageId,
                         msg.LastAutoHelloMessage);
 
+                    _logger.LogInformation(
+                        "[WaifuChat] Enqueued for {TwitchId}, awaiting LLM response...",
+                        msg.TwitchId);
+
                     var response = await request.TaskCompletionSource.Task;
+
+                    _logger.LogInformation(
+                        "[WaifuChat] LLM response for {TwitchId}: '{Response}' (length={Length})",
+                        msg.TwitchId, response ?? "(null)", response?.Length ?? 0);
 
                     if (!string.IsNullOrWhiteSpace(response) && Connection?.State == HubConnectionState.Connected)
                     {
+                        _logger.LogInformation(
+                            "[WaifuChat] Sending WaifuChatResponse to server for {TwitchId}",
+                            msg.TwitchId);
+
                         await Connection.InvokeAsync(
                             nameof(IAudioControllerHubServer.WaifuChatResponse),
                             new WaifuChatResponse
@@ -375,11 +392,21 @@ public class AudioControllerHubClientHostedService : BackgroundService
                                 Response = response,
                                 MessageId = msg.MessageId,
                             });
+
+                        _logger.LogInformation(
+                            "[WaifuChat] WaifuChatResponse sent successfully for {TwitchId}",
+                            msg.TwitchId);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "[WaifuChat] Cannot send response: response={IsNull}, connection={State}",
+                            response == null, Connection?.State);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to process WaifuChatMessage for {TwitchId}", msg.TwitchId);
+                    _logger.LogError(ex, "[WaifuChat] Failed to process WaifuChatMessage for {TwitchId}", msg.TwitchId);
                 }
             }
         );

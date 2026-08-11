@@ -23,8 +23,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
     private readonly MessageProcessingQueue _messageQueue = new();
     private readonly CancellationTokenSource _processingCts = new();
 
-    private const string SystemPromptTemplate =
-        """
+    private const string SystemPromptTemplate = """
         Ты — {waifuName}, жена {displayName}. Ты общаешься с ним в Twitch чате.
         Ты любящая, заботливая и немного ревнивая жена. Говори коротко (до 2-3 предложений).
         Помни что обсуждала ранее с мужем. Упоминай детали из прошлых разговоров.
@@ -49,7 +48,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             () => ProcessQueueAsync(_processingCts.Token),
             _processingCts.Token,
             TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
+            TaskScheduler.Default
+        );
     }
 
     public ChatRequest EnqueueMessage(
@@ -59,7 +59,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         string message,
         string? characterDescription,
         string? messageId = null,
-        string? lastAutoHelloMessage = null)
+        string? lastAutoHelloMessage = null
+    )
     {
         var request = new ChatRequest
         {
@@ -77,7 +78,10 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
         _logger.LogInformation(
             "Enqueued message for {TwitchId} ({DisplayName}) as {WaifuName}",
-            twitchId, displayName, waifuName);
+            twitchId,
+            displayName,
+            waifuName
+        );
 
         return request;
     }
@@ -122,8 +126,11 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             EvictStaleSessions();
 
             var systemPrompt = BuildSystemPrompt(
-                request.WaifuName, request.DisplayName,
-                request.CharacterDescription, request.LastAutoHelloMessage);
+                request.WaifuName,
+                request.DisplayName,
+                request.CharacterDescription,
+                request.LastAutoHelloMessage
+            );
 
             var chat = _viewerChats.GetOrAdd(
                 request.TwitchId,
@@ -140,7 +147,11 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
             _logger.LogInformation(
                 "Starting inference for {TwitchId} ({DisplayName}) as {WaifuName}, message: {Message}",
-                request.TwitchId, request.DisplayName, request.WaifuName, request.Message);
+                request.TwitchId,
+                request.DisplayName,
+                request.WaifuName,
+                request.Message
+            );
 
             var responseBuilder = new StringBuilder();
             var hasNonReasoningTokens = false;
@@ -153,11 +164,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeoutCts.CancelAfter(TimeSpan.FromSeconds(60));
 
-                result = await Task.Factory.StartNew(
-                    () => chat.Submit(request.Message, timeoutCts.Token),
-                    timeoutCts.Token,
-                    TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default);
+                result = await chat.SubmitAsync(request.Message, timeoutCts.Token);
             }
             finally
             {
@@ -173,7 +180,10 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             sw.Stop();
             _logger.LogInformation(
                 "Response generated for {TwitchId}: {Length} chars in {Elapsed}ms",
-                request.TwitchId, responseText.Length, sw.ElapsedMilliseconds);
+                request.TwitchId,
+                responseText.Length,
+                sw.ElapsedMilliseconds
+            );
 
             _messageQueue.CompleteMessage(request, responseText);
 
@@ -191,15 +201,20 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             sw.Stop();
             _logger.LogWarning(
                 "LLM inference timed out for {TwitchId} after {Elapsed}ms",
-                request.TwitchId, sw.ElapsedMilliseconds);
+                request.TwitchId,
+                sw.ElapsedMilliseconds
+            );
             _messageQueue.CompleteWithError(request, "Ответ занял слишком много времени");
         }
         catch (Exception ex)
         {
             sw.Stop();
-            _logger.LogError(ex,
+            _logger.LogError(
+                ex,
                 "Failed to generate LLM response for {TwitchId} after {Elapsed}ms",
-                request.TwitchId, sw.ElapsedMilliseconds);
+                request.TwitchId,
+                sw.ElapsedMilliseconds
+            );
             _messageQueue.CompleteWithError(request, ex.Message);
         }
     }
@@ -211,7 +226,10 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             return completion;
         }
 
-        var thinkIndex = completion.IndexOf("Thinking Process:", StringComparison.OrdinalIgnoreCase);
+        var thinkIndex = completion.IndexOf(
+            "Thinking Process:",
+            StringComparison.OrdinalIgnoreCase
+        );
         if (thinkIndex < 0)
         {
             return completion;
@@ -282,8 +300,11 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
     }
 
     private string BuildSystemPrompt(
-        string waifuName, string displayName, string? characterDescription,
-        string? lastAutoHelloMessage = null)
+        string waifuName,
+        string displayName,
+        string? characterDescription,
+        string? lastAutoHelloMessage = null
+    )
     {
         var prompt = SystemPromptTemplate
             .Replace("{waifuName}", waifuName)
@@ -301,7 +322,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
         var now = TimeZoneInfo.ConvertTimeFromUtc(
             DateTime.UtcNow,
-            TimeZoneInfo.FindSystemTimeZoneById("Russian Standard Time"));
+            TimeZoneInfo.FindSystemTimeZoneById("Russian Standard Time")
+        );
 
         prompt += $"\n\nТекущая дата и время: {now:dd.MM.yyyy, dddd, HH:mm} (МСК).";
 
