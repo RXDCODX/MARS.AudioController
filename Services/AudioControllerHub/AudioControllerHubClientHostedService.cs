@@ -26,6 +26,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
     private readonly ISyntheziaQueueManager _queueManager;
     private readonly ITtsHubConnectionHolder _hubConnectionHolder;
     private readonly WaifuLlmService? _waifuLlmService;
+    private readonly WaifuChatClassifier? _classifier;
     private readonly ILogger<AudioControllerHubClientHostedService> _logger;
 
     public HubConnection? Connection { get; private set; }
@@ -37,7 +38,8 @@ public class AudioControllerHubClientHostedService : BackgroundService
         ISyntheziaQueueManager queueManager,
         ITtsHubConnectionHolder hubConnectionHolder,
         ILogger<AudioControllerHubClientHostedService> logger,
-        WaifuLlmService? waifuLlmService = null
+        WaifuLlmService? waifuLlmService = null,
+        WaifuChatClassifier? classifier = null
     )
     {
         _configuration = configuration;
@@ -47,6 +49,7 @@ public class AudioControllerHubClientHostedService : BackgroundService
         _hubConnectionHolder = hubConnectionHolder;
         _logger = logger;
         _waifuLlmService = waifuLlmService;
+        _classifier = classifier;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -337,6 +340,23 @@ public class AudioControllerHubClientHostedService : BackgroundService
 
                 try
                 {
+                    // Классификатор проверяет точно ли это обращение к жене
+                    if (_classifier is not null)
+                    {
+                        var classification = _classifier.Classify(msg.Message);
+                        if (!classification.IsWaifuChat)
+                        {
+                            _logger.LogDebug(
+                                "Message from {TwitchId} classified as {Category}, skipping",
+                                msg.TwitchId, classification.Category);
+                            return;
+                        }
+
+                        _logger.LogInformation(
+                            "Message from {TwitchId} classified as waifu_chat (gender={Gender})",
+                            msg.TwitchId, classification.DetectedGender);
+                    }
+
                     var request = _waifuLlmService.EnqueueMessage(
                         msg.TwitchId, msg.DisplayName, msg.WaifuName ?? "жена",
                         msg.Message, msg.CharacterDescription, msg.MessageId,
