@@ -48,6 +48,7 @@ public class Program
         // WaifuChat LLM service
         builder.Services.Configure<WaifuChatOptions>(
             builder.Configuration.GetSection(WaifuChatOptions.SectionName));
+        builder.Services.AddSingleton<WaifuChatClassifier>();
         builder.Services.AddSingleton<WaifuLlmService>();
         builder.Services.AddSingleton<IWaifuLlmService>(sp =>
             sp.GetRequiredService<WaifuLlmService>());

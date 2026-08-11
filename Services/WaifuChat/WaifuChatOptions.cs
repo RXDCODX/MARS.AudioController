@@ -6,6 +6,8 @@ public class WaifuChatOptions
 
     public string ChatModelId { get; set; } = "gemma4:e2b";
 
+    public string ClassifierModelId { get; set; } = "lmkit-tasks:4b-preview";
+
     public string EmbedModelId { get; set; } = "embeddinggemma-300m";
 
     public string ConnectionString { get; set; } = string.Empty;
