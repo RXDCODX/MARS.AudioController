@@ -15,10 +15,16 @@ public class WaifuChatClassifier : IDisposable
 
     private const string ClassificationGuidance =
         """
-        Определи, является ли сообщение обращением к жене/подруге в Twitch чате.
-        Обращение к жене включает: прямое имя персонажа, слова 'жена', 'wife', 'моя дорогая',
-        вопросы к жене, просьбы рассказать что-то, комплименты, ревность.
-        Общее общение: обсуждение игр, приветствия не к жене, вопросы к чату, мемы, команды бота.
+        Определи, является ли сообщение обращением к партнёру/супругу в Twitch чате.
+
+        Обращения включают:
+        - Женский род: жена, wife, моя дорогая, милая, котик, солнце, зайка
+        - Мужской род: муж, husband, мой дорогой, милый
+        - Нейтральный: супруг, супруга, spouse, партнёр, partner, половинка, любимый/любимая
+        - Прямое имя персонажа (например: Куруми, Рин, Рем)
+        - Вопросы к партнёру, просьбы рассказать, комплименты, ревность
+
+        Общее общение: обсуждение игр, приветствия не к партнёру, вопросы к чату, мемы, команды бота.
         """;
 
     public WaifuChatClassifier(
@@ -50,6 +56,7 @@ public class WaifuChatClassifier : IDisposable
             {
                 Category = category,
                 IsWaifuChat = categoryIndex == 0,
+                DetectedGender = categoryIndex == 0 ? DetectGender(message) : null,
             };
         }
         catch (Exception ex)
@@ -59,8 +66,35 @@ public class WaifuChatClassifier : IDisposable
             {
                 Category = "general_chat",
                 IsWaifuChat = false,
+                DetectedGender = null,
             };
         }
+    }
+
+    private static string? DetectGender(string message)
+    {
+        var lower = message.ToLowerInvariant();
+
+        if (lower.Contains("жена") || lower.Contains("wife") || lower.Contains("милая")
+            || lower.Contains("котик") || lower.Contains("солнце") || lower.Contains("зайка")
+            || lower.Contains("дорогая") || lower.Contains("любимая"))
+        {
+            return "female";
+        }
+
+        if (lower.Contains("муж") || lower.Contains("husband") || lower.Contains("милый")
+            || lower.Contains("дорогой") || lower.Contains("любимый"))
+        {
+            return "male";
+        }
+
+        if (lower.Contains("супруг") || lower.Contains("spouse") || lower.Contains("партнёр")
+            || lower.Contains("partner") || lower.Contains("половинка"))
+        {
+            return "neutral";
+        }
+
+        return null;
     }
 
     public void Dispose()
@@ -73,4 +107,5 @@ public class ClassificationResult
 {
     public required string Category { get; set; }
     public bool IsWaifuChat { get; set; }
+    public string? DetectedGender { get; set; }
 }
