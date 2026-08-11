@@ -14,5 +14,7 @@ public class ChatRequest
 
     public string? MessageId { get; set; }
 
+    public string? LastAutoHelloMessage { get; set; }
+
     public TaskCompletionSource<string?> TaskCompletionSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

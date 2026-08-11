@@ -58,7 +58,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         string waifuName,
         string message,
         string? characterDescription,
-        string? messageId = null)
+        string? messageId = null,
+        string? lastAutoHelloMessage = null)
     {
         var request = new ChatRequest
         {
@@ -68,6 +69,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             Message = message,
             CharacterDescription = characterDescription,
             MessageId = messageId,
+            LastAutoHelloMessage = lastAutoHelloMessage,
         };
 
         _messageQueue.Enqueue(request);
@@ -114,12 +116,14 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
     private async Task ProcessMessageAsync(ChatRequest request, CancellationToken ct)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             EvictStaleSessions();
 
             var systemPrompt = BuildSystemPrompt(
-                request.WaifuName, request.DisplayName, request.CharacterDescription);
+                request.WaifuName, request.DisplayName,
+                request.CharacterDescription, request.LastAutoHelloMessage);
 
             var chat = _viewerChats.GetOrAdd(
                 request.TwitchId,
@@ -135,8 +139,8 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             _lastActivity[request.TwitchId] = DateTime.UtcNow;
 
             _logger.LogInformation(
-                "Generating response for {TwitchId} ({DisplayName}) as {WaifuName}",
-                request.TwitchId, request.DisplayName, request.WaifuName);
+                "Starting inference for {TwitchId} ({DisplayName}) as {WaifuName}, message: {Message}",
+                request.TwitchId, request.DisplayName, request.WaifuName, request.Message);
 
             var responseBuilder = new StringBuilder();
             var hasNonReasoningTokens = false;
@@ -146,9 +150,12 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
             TextGenerationResult result;
             try
             {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(60));
+
                 result = await Task.Factory.StartNew(
-                    () => chat.Submit(request.Message, ct),
-                    ct,
+                    () => chat.Submit(request.Message, timeoutCts.Token),
+                    timeoutCts.Token,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default);
             }
@@ -163,6 +170,11 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
 
             responseText = StripThinkingProcess(responseText);
 
+            sw.Stop();
+            _logger.LogInformation(
+                "Response generated for {TwitchId}: {Length} chars in {Elapsed}ms",
+                request.TwitchId, responseText.Length, sw.ElapsedMilliseconds);
+
             _messageQueue.CompleteMessage(request, responseText);
 
             void OnAfterTextCompletion(object? sender, AfterTextCompletionEventArgs e)
@@ -174,9 +186,20 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 }
             }
         }
+        catch (OperationCanceledException) when (sw.ElapsedMilliseconds > 55000)
+        {
+            sw.Stop();
+            _logger.LogWarning(
+                "LLM inference timed out for {TwitchId} after {Elapsed}ms",
+                request.TwitchId, sw.ElapsedMilliseconds);
+            _messageQueue.CompleteWithError(request, "Ответ занял слишком много времени");
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate LLM response for {TwitchId}", request.TwitchId);
+            sw.Stop();
+            _logger.LogError(ex,
+                "Failed to generate LLM response for {TwitchId} after {Elapsed}ms",
+                request.TwitchId, sw.ElapsedMilliseconds);
             _messageQueue.CompleteWithError(request, ex.Message);
         }
     }
@@ -258,7 +281,9 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         }
     }
 
-    private string BuildSystemPrompt(string waifuName, string displayName, string? characterDescription)
+    private string BuildSystemPrompt(
+        string waifuName, string displayName, string? characterDescription,
+        string? lastAutoHelloMessage = null)
     {
         var prompt = SystemPromptTemplate
             .Replace("{waifuName}", waifuName)
@@ -267,6 +292,11 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         if (!string.IsNullOrWhiteSpace(characterDescription))
         {
             prompt += $"\n\n## Твой характер (из аниме):\n{characterDescription}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(lastAutoHelloMessage))
+        {
+            prompt += $"\n\n## Контекст:\n{lastAutoHelloMessage}";
         }
 
         var now = TimeZoneInfo.ConvertTimeFromUtc(

@@ -8,7 +8,8 @@ public interface IWaifuLlmService
         string waifuName,
         string message,
         string? characterDescription,
-        string? messageId = null);
+        string? messageId = null,
+        string? lastAutoHelloMessage = null);
 
     bool IsProcessingOrQueued(string twitchId);
 
