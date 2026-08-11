@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using MARS.Shared.Models;
 
 namespace MARS.AudioController.Services.TTS;
 

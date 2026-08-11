@@ -3,6 +3,7 @@ using MARS.AudioController.Services;
 using MARS.AudioController.Services.AudioControllerHub;
 using MARS.AudioController.Services.Obs;
 using MARS.AudioController.Services.TTS;
+using MARS.AudioController.Services.WaifuChat;
 using OBSWebsocketDotNet;
 
 namespace MARS.AudioController;
@@ -43,6 +44,16 @@ public class Program
             sp.GetRequiredService<ObsProcessMonitor>()
         );
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ObsProcessMonitor>());
+
+        // WaifuChat LLM service
+        builder.Services.Configure<WaifuChatOptions>(
+            builder.Configuration.GetSection(WaifuChatOptions.SectionName));
+        builder.Services.AddSingleton<WaifuChatClassifier>();
+        builder.Services.AddSingleton<WaifuLlmService>();
+        builder.Services.AddSingleton<IWaifuLlmService>(sp =>
+            sp.GetRequiredService<WaifuLlmService>());
+        builder.Services.AddSingleton<IStreamStateProvider, DefaultStreamStateProvider>();
+        builder.Services.AddHostedService<WaifuChatCleanupService>();
 
         builder.Services.AddControllers();
         builder.Logging.AddConsole();
