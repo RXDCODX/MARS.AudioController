@@ -345,8 +345,14 @@ public class AudioControllerHubClientHostedService : BackgroundService
 
                 try
                 {
-                    // Классификатор проверяет точно ли это обращение к жене
-                    if (_classifier is not null)
+                    // Если SkipClassifier — сразу в LLM, иначе через классификатор
+                    if (msg.SkipClassifier)
+                    {
+                        _logger.LogInformation(
+                            "[WaifuChat] SkipClassifier=true — direct to LLM for {TwitchId}",
+                            msg.TwitchId);
+                    }
+                    else if (_classifier is not null)
                     {
                         var classification = _classifier.Classify(msg.Message);
                         if (!classification.IsWaifuChat)
