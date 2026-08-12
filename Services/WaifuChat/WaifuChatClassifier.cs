@@ -41,23 +41,41 @@ public class WaifuChatClassifier : IDisposable
         _logger.LogInformation("Classifier model loaded successfully");
     }
 
+    private static readonly string[] WaifuKeywords =
+    [
+        "жена", "муж", "супруг", "супруга", "партнёр", "партнер", "половинка",
+        "wife", "husband", "spouse", "partner"
+    ];
+
     public ClassificationResult Classify(string message)
     {
         try
         {
-            _classifier.Guidance = ClassificationGuidance;
-            var categoryIndex = _classifier.GetBestCategory(Categories, message);
-            var category = Categories[categoryIndex];
+            var lower = message.ToLowerInvariant();
+            var hasKeyword = WaifuKeywords.Any(kw => lower.Contains(kw));
 
-            _logger.LogDebug(
-                "Classified message: {Category} (index={Index})",
-                category, categoryIndex);
+            string category;
+            if (hasKeyword)
+            {
+                category = "waifu_chat";
+                _logger.LogDebug("Classified by keyword match: {Category}", category);
+            }
+            else
+            {
+                _classifier.Guidance = ClassificationGuidance;
+                var categoryIndex = _classifier.GetBestCategory(Categories, message);
+                category = Categories[categoryIndex];
+
+                _logger.LogDebug(
+                    "Classified by model: {Category} (index={Index})",
+                    category, categoryIndex);
+            }
 
             return new ClassificationResult
             {
                 Category = category,
-                IsWaifuChat = categoryIndex == 0,
-                DetectedGender = categoryIndex == 0 ? DetectGender(message) : null,
+                IsWaifuChat = category == "waifu_chat",
+                DetectedGender = category == "waifu_chat" ? DetectGender(message) : null,
             };
         }
         catch (Exception ex)
