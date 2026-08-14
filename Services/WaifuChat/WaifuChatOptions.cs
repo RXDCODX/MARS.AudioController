@@ -4,6 +4,12 @@ public class WaifuChatOptions
 {
     public const string SectionName = "WaifuChat";
 
+    /// <summary>
+    /// ID модели. Поддерживает:
+    /// - Enum строку: "Gemma4_E2b", "Llama31_8b"
+    /// - LM-Kit ID: "gemma4:e2b", "llama3.1"
+    /// - Любой валидный LM-Kit model ID
+    /// </summary>
     public string ChatModelId { get; set; } = "gemma4:e2b";
 
     public string ClassifierModelId { get; set; } = "lmkit-tasks:4b-preview";
@@ -27,4 +33,13 @@ public class WaifuChatOptions
     public int MaxViewerSessions { get; set; } = 50;
 
     public TimeSpan SessionEvictionTimeout { get; set; } = TimeSpan.FromHours(2);
+
+    public string GetChatModelId()
+    {
+        if (Enum.TryParse<ChatModel>(ChatModelId, ignoreCase: true, out var model))
+        {
+            return model.ToModelId();
+        }
+        return ChatModelId;
+    }
 }

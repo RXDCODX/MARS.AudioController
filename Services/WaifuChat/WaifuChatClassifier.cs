@@ -15,17 +15,20 @@ public class WaifuChatClassifier : IDisposable
 
     private const string ClassificationGuidance =
         """
-        Определи, является ли сообщение обращением к партнёру/супругу в Twitch чате.
+        Классифицируй сообщение как обращение к партнёру (waifu_chat) или общее общение (general_chat).
 
-        Триггеры (waifu_chat):
-        - Женский род: жена, wife, моя дорогая, милая, котик, солнце, зайка, дорогая, любимая
-        - Мужской род: муж, husband, мой дорогой, милый, дорогой, любимый
-        - Нейтральный: супруг, супруга, spouse, партнёр, partner, половинка
-        - Прямое имя персонажа (например: Куруми, Рин, Рем)
-        - Вопросы к партнёру, просьбы рассказать, комплименты, ревность
-        - Реплай на сообщение партнёра
+        waifu_chat — если сообщение:
+        - Содержит обращение: любимка, котик, солнце, зайка, дорогая, милая, родная, красавица
+        - Обращено к имени персонажа: Куруми, Рин, Рем, Асуна
+        - Содержит комплимент или ревность
+        - Является вопросом/просьбой к партнёру
+        - Содержит "жена", "муж", "супруг", "партнёр"
 
-        general_chat: обсуждение игр, мемы, команды бота (!roll, !coinflip), вопросы к чату.
+        general_chat — если сообщение:
+        - Обсуждает игры, стримы, новости
+        - Содержит команды бота: !roll, !coinflip
+        - Обращено к чату, а не к партнёру
+        - Содержит "привет всем", "как дела" без обращения к партнёру
         """;
 
     public WaifuChatClassifier(
@@ -43,8 +46,15 @@ public class WaifuChatClassifier : IDisposable
 
     private static readonly string[] WaifuKeywords =
     [
+        // Прямые обращения
         "жена", "муж", "супруг", "супруга", "партнёр", "партнер", "половинка",
-        "wife", "husband", "spouse", "partner"
+        "wife", "husband", "spouse", "partner",
+        // Ласковые
+        "любимая", "любимый", "любимка", "дорогая", "дорогой",
+        "милая", "милый", "котик", "солнце", "зайка", "зайчик",
+        "родная", "родной", "красавица", "красавец",
+        // Английские
+        "darling", "babe", "honey", "sweetie", "dear",
     ];
 
     public ClassificationResult Classify(string message)
@@ -96,13 +106,14 @@ public class WaifuChatClassifier : IDisposable
 
         if (lower.Contains("жена") || lower.Contains("wife") || lower.Contains("милая")
             || lower.Contains("котик") || lower.Contains("солнце") || lower.Contains("зайка")
-            || lower.Contains("дорогая") || lower.Contains("любимая"))
+            || lower.Contains("дорогая") || lower.Contains("любимая") || lower.Contains("любимка")
+            || lower.Contains("родная") || lower.Contains("красавица"))
         {
             return "female";
         }
 
         if (lower.Contains("муж") || lower.Contains("husband") || lower.Contains("милый")
-            || lower.Contains("дорогой") || lower.Contains("любимый"))
+            || lower.Contains("дорогой") || lower.Contains("любимый") || lower.Contains("родной"))
         {
             return "male";
         }

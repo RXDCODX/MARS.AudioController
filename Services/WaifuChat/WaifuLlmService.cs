@@ -36,8 +36,9 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         _options = options.Value;
         _logger = logger;
 
-        _logger.LogInformation("Loading chat model: {ModelId}", _options.ChatModelId);
-        _chatModel = LM.LoadFromModelID(_options.ChatModelId);
+        var modelId = _options.GetChatModelId();
+        _logger.LogInformation("Loading chat model: {ModelId}", modelId);
+        _chatModel = LM.LoadFromModelID(modelId);
 
         _logger.LogInformation("Loading embedding model: {ModelId}", _options.EmbedModelId);
         _embedModel = LM.LoadFromModelID(_options.EmbedModelId);
@@ -175,7 +176,7 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
                 ? responseBuilder.ToString().Trim()
                 : result.Completion.Trim();
 
-            responseText = StripThinkingProcess(responseText);
+            responseText = StripSpecialTokens(responseText);
 
             sw.Stop();
             _logger.LogInformation(
@@ -243,6 +244,23 @@ public class WaifuLlmService : IWaifuLlmService, IDisposable
         }
 
         return afterThink.TrimStart();
+    }
+
+    public static string StripSpecialTokens(string completion)
+    {
+        if (string.IsNullOrWhiteSpace(completion))
+        {
+            return completion;
+        }
+
+        // Удаляем все теги между < > (включая <audio|>, <think>, </think> и т.д.)
+        var result = System.Text.RegularExpressions.Regex.Replace(
+            completion, @"<[^>]*>", "");
+
+        // Удаляем Thinking Process блок
+        result = StripThinkingProcess(result);
+
+        return result.Trim();
     }
 
     public virtual async Task ExtractAndSaveAllFactsAsync(CancellationToken ct)
