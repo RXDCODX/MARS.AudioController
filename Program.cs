@@ -15,18 +15,56 @@ public class Program
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddSingleton<AudioControllerService>();
-        builder.Services.AddSingleton<TtsPlaybackStateService>();
-        builder.Services.AddSingleton<TtsPlaybackService>();
-        builder.Services.AddSingleton<SystemSpeechTtsPlaybackService>();
         builder.Services.AddSingleton<TtsHubConnectionHolder>();
         builder.Services.AddSingleton<ITtsHubConnectionHolder>(sp =>
             sp.GetRequiredService<TtsHubConnectionHolder>()
         );
-        builder.Services.AddSingleton<SyntheziaQueueManager>();
-        builder.Services.AddSingleton<ISyntheziaQueueManager>(sp =>
-            sp.GetRequiredService<SyntheziaQueueManager>()
-        );
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<SyntheziaQueueManager>());
+
+        // TTS — conditional registration
+        builder.Services.Configure<TtsOptions>(
+            builder.Configuration.GetSection(TtsOptions.SectionName));
+
+        var ttsSection = builder.Configuration.GetSection(TtsOptions.SectionName);
+        var ttsEnabled = ttsSection.GetValue<bool>("Enabled", true);
+
+        if (ttsEnabled)
+        {
+            var windowsTtsEnabled = ttsSection
+                .GetSection("WindowsTts")
+                .GetValue<bool>("Enabled", true);
+            if (windowsTtsEnabled)
+            {
+                builder.Services.AddSingleton<SystemSpeechTtsPlaybackService>();
+            }
+            else
+            {
+                builder.Services.AddSingleton<SystemSpeechTtsPlaybackService?>(_ => null);
+            }
+
+            var onnxTtsEnabled = ttsSection
+                .GetSection("OnnxTts")
+                .GetValue<bool>("Enabled", true);
+            if (onnxTtsEnabled)
+            {
+                builder.Services.AddSingleton<TtsPlaybackService>();
+            }
+            else
+            {
+                builder.Services.AddSingleton<TtsPlaybackService?>(_ => null);
+            }
+
+            builder.Services.AddSingleton<TtsPlaybackStateService>();
+            builder.Services.AddSingleton<SyntheziaQueueManager>();
+            builder.Services.AddSingleton<ISyntheziaQueueManager>(sp =>
+                sp.GetRequiredService<SyntheziaQueueManager>());
+            builder.Services.AddHostedService(sp =>
+                sp.GetRequiredService<SyntheziaQueueManager>());
+        }
+        else
+        {
+            builder.Services.AddSingleton<ISyntheziaQueueManager, NoOpSyntheziaQueueManager>();
+        }
+
         builder.Services.AddSingleton<AudioControllerHubClientHostedService>();
         builder.Services.AddHostedService(sp =>
             sp.GetRequiredService<AudioControllerHubClientHostedService>()
@@ -45,15 +83,23 @@ public class Program
         );
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ObsProcessMonitor>());
 
-        // WaifuChat LLM service
+        // WaifuChat LLM service — conditional registration
         builder.Services.Configure<WaifuChatOptions>(
             builder.Configuration.GetSection(WaifuChatOptions.SectionName));
-        builder.Services.AddSingleton<WaifuChatClassifier>();
-        builder.Services.AddSingleton<WaifuLlmService>();
-        builder.Services.AddSingleton<IWaifuLlmService>(sp =>
-            sp.GetRequiredService<WaifuLlmService>());
-        builder.Services.AddSingleton<IStreamStateProvider, DefaultStreamStateProvider>();
-        builder.Services.AddHostedService<WaifuChatCleanupService>();
+
+        var waifuChatEnabled = builder.Configuration
+            .GetSection(WaifuChatOptions.SectionName)
+            .GetValue<bool>("Enabled", true);
+
+        if (waifuChatEnabled)
+        {
+            builder.Services.AddSingleton<WaifuChatClassifier>();
+            builder.Services.AddSingleton<WaifuLlmService>();
+            builder.Services.AddSingleton<IWaifuLlmService>(sp =>
+                sp.GetRequiredService<WaifuLlmService>());
+            builder.Services.AddSingleton<IStreamStateProvider, DefaultStreamStateProvider>();
+            builder.Services.AddHostedService<WaifuChatCleanupService>();
+        }
 
         builder.Services.AddControllers();
         builder.Logging.AddConsole();
