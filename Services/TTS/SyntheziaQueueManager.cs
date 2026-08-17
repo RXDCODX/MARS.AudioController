@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 using MARS.AudioController.Models;
 using MARS.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Options;
 using NAudio.Dsp;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
@@ -21,11 +22,11 @@ public interface ISyntheziaQueueManager
 
 [SupportedOSPlatform("windows")]
 public class SyntheziaQueueManager(
-    TtsPlaybackService ttsPlaybackService,
-    SystemSpeechTtsPlaybackService systemSpeechTtsPlaybackService,
+    TtsPlaybackService? ttsPlaybackService,
+    SystemSpeechTtsPlaybackService? systemSpeechTtsPlaybackService,
     TtsPlaybackStateService playbackState,
     ITtsHubConnectionHolder hubConnectionHolder,
-    IConfiguration configuration,
+    IOptions<TtsOptions> ttsOptions,
     ILogger<SyntheziaQueueManager> logger
 ) : BackgroundService, ISyntheziaQueueManager
 {
@@ -50,10 +51,9 @@ public class SyntheziaQueueManager(
         { "F4", "Татьяна" },
         { "F5", "Мария" },
     };
-    private readonly List<string> _availableVoiceStyles =
-        configuration.GetSection("Tts:VoiceStyles").Get<List<string>>() ?? [];
+    private readonly List<string> _availableVoiceStyles = ttsOptions.Value.VoiceStyles;
     private readonly IReadOnlyList<string> _availableSystemVoices =
-        systemSpeechTtsPlaybackService.GetInstalledVoices();
+        systemSpeechTtsPlaybackService?.GetInstalledVoices() ?? [];
     private string? _lastUserTwitchId;
 
     public Task EnqueueAsync(TwitchUser user, string message)
@@ -248,25 +248,43 @@ public class SyntheziaQueueManager(
     {
         if (assignment.Engine == VoiceEngine.WinApi)
         {
-            await systemSpeechTtsPlaybackService.PlayAsync(
-                text,
-                assignment.VoiceId,
-                playbackState.Volume,
-                cancellationToken
-            );
+            if (systemSpeechTtsPlaybackService is not null)
+            {
+                await systemSpeechTtsPlaybackService.PlayAsync(
+                    text,
+                    assignment.VoiceId,
+                    playbackState.Volume,
+                    cancellationToken
+                );
+            }
+            else
+            {
+                logger.LogWarning(
+                    "Windows TTS is disabled — skipping WinApi voice playback for {VoiceId}",
+                    assignment.VoiceId);
+            }
         }
         else
         {
-            await ttsPlaybackService.PlayAsync(
-                new TtsPlaybackRequest
-                {
-                    Text = text,
-                    VoiceStylePath = assignment.VoiceId,
-                    Volume = playbackState.Volume,
-                    Language = "na",
-                },
-                cancellationToken
-            );
+            if (ttsPlaybackService is not null)
+            {
+                await ttsPlaybackService.PlayAsync(
+                    new TtsPlaybackRequest
+                    {
+                        Text = text,
+                        VoiceStylePath = assignment.VoiceId,
+                        Volume = playbackState.Volume,
+                        Language = "na",
+                    },
+                    cancellationToken
+                );
+            }
+            else
+            {
+                logger.LogWarning(
+                    "ONNX TTS is disabled — skipping ONNX voice playback for {VoiceId}",
+                    assignment.VoiceId);
+            }
         }
     }
 
@@ -284,34 +302,50 @@ public class SyntheziaQueueManager(
 
             if (assignment.Engine == VoiceEngine.WinApi)
             {
-                var wavBytes = await systemSpeechTtsPlaybackService.GenerateSpeechWavAsync(
-                    text,
-                    assignment.VoiceId,
-                    cancellationToken
-                );
-
-                if (wavBytes.Length > 0)
+                if (systemSpeechTtsPlaybackService is not null)
                 {
-                    (pcmAudio, sampleRate) = ExtractPcmFromWav(wavBytes);
+                    var wavBytes = await systemSpeechTtsPlaybackService.GenerateSpeechWavAsync(
+                        text,
+                        assignment.VoiceId,
+                        cancellationToken
+                    );
+
+                    if (wavBytes.Length > 0)
+                    {
+                        (pcmAudio, sampleRate) = ExtractPcmFromWav(wavBytes);
+                    }
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "Windows TTS is disabled — skipping WinApi voice for Discord relay");
                 }
             }
             else
             {
-                var result = await ttsPlaybackService.GeneratePcmAsync(
-                    new TtsPlaybackRequest
-                    {
-                        Text = text,
-                        VoiceStylePath = assignment.VoiceId,
-                        Volume = playbackState.Volume,
-                        Language = "na",
-                    },
-                    cancellationToken
-                );
-
-                if (result is not null)
+                if (ttsPlaybackService is not null)
                 {
-                    pcmAudio = result.Value.Pcm;
-                    sampleRate = result.Value.SampleRate;
+                    var result = await ttsPlaybackService.GeneratePcmAsync(
+                        new TtsPlaybackRequest
+                        {
+                            Text = text,
+                            VoiceStylePath = assignment.VoiceId,
+                            Volume = playbackState.Volume,
+                            Language = "na",
+                        },
+                        cancellationToken
+                    );
+
+                    if (result is not null)
+                    {
+                        pcmAudio = result.Value.Pcm;
+                        sampleRate = result.Value.SampleRate;
+                    }
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "ONNX TTS is disabled — skipping ONNX voice for Discord relay");
                 }
             }
 
