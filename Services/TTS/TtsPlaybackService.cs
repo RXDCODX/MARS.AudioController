@@ -137,7 +137,11 @@ public class TtsPlaybackService(
         CancellationToken cancellationToken = default
     )
     {
-        if (request == null || string.IsNullOrWhiteSpace(request.Text) || string.IsNullOrWhiteSpace(request.Language))
+        if (
+            request == null
+            || string.IsNullOrWhiteSpace(request.Text)
+            || string.IsNullOrWhiteSpace(request.Language)
+        )
         {
             return null;
         }
@@ -145,7 +149,10 @@ public class TtsPlaybackService(
         try
         {
             var resolvedOnnxDir = ResolvePath(request.OnnxDir, "assets/onnx");
-            var resolvedVoiceStylePath = ResolvePath(request.VoiceStylePath, "assets/voice_styles/M1.json");
+            var resolvedVoiceStylePath = ResolvePath(
+                request.VoiceStylePath,
+                "assets/voice_styles/M1.json"
+            );
 
             if (!Directory.Exists(resolvedOnnxDir) || !File.Exists(resolvedVoiceStylePath))
             {
@@ -180,7 +187,7 @@ public class TtsPlaybackService(
         var lazy = _textToSpeechCache.GetOrAdd(
             cacheKey,
             _ => new Lazy<TextToSpeech>(
-                () => Helper.LoadTextToSpeech(onnxDir, useGpu),
+                () => Helper.LoadTextToSpeech(onnxDir, useGpu, logger),
                 LazyThreadSafetyMode.ExecutionAndPublication
             )
         );
@@ -193,7 +200,7 @@ public class TtsPlaybackService(
         var lazy = _styleCache.GetOrAdd(
             voiceStylePath,
             _ => new Lazy<Style>(
-                () => Helper.LoadVoiceStyle([voiceStylePath], verbose: false),
+                () => Helper.LoadVoiceStyle([voiceStylePath], verbose: false, logger),
                 LazyThreadSafetyMode.ExecutionAndPublication
             )
         );

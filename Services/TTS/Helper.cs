@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SessionOptions = Microsoft.ML.OnnxRuntime.SessionOptions;
@@ -554,7 +555,8 @@ public static class Helper
     );
 
     private static readonly HashSet<string> CommonSecondLevelTlds = new(
-        StringComparer.OrdinalIgnoreCase)
+        StringComparer.OrdinalIgnoreCase
+    )
     {
         "ac",
         "co",
@@ -617,12 +619,19 @@ public static class Helper
 
         if (!string.IsNullOrWhiteSpace(result))
         {
-            var labels = result.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var labels = result.Split(
+                '.',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            );
             if (labels.Length == 1)
             {
                 result = labels[0];
             }
-            else if (labels.Length >= 3 && labels[^1].Length == 2 && CommonSecondLevelTlds.Contains(labels[^2]))
+            else if (
+                labels.Length >= 3
+                && labels[^1].Length == 2
+                && CommonSecondLevelTlds.Contains(labels[^2])
+            )
             {
                 result = labels[^3];
             }
@@ -734,7 +743,11 @@ public static class Helper
     // Voice style loading
     // ============================================================================
 
-    public static Style LoadVoiceStyle(List<string> voiceStylePaths, bool verbose = false)
+    public static Style LoadVoiceStyle(
+        List<string> voiceStylePaths,
+        bool verbose = false,
+        ILogger? logger = null
+    )
     {
         var bsz = voiceStylePaths.Count;
 
@@ -798,7 +811,7 @@ public static class Helper
 
         if (verbose)
         {
-            Console.WriteLine($"Loaded {bsz} voice styles");
+            logger?.LogInformation("Loaded {Bsz} voice styles", bsz);
         }
 
         return new Style(ttlFlat, ttlShape, dpFlat, dpShape);
@@ -838,7 +851,11 @@ public static class Helper
     // TextToSpeech loading
     // ============================================================================
 
-    public static TextToSpeech LoadTextToSpeech(string onnxDir, bool useGpu = false)
+    public static TextToSpeech LoadTextToSpeech(
+        string onnxDir,
+        bool useGpu = false,
+        ILogger? logger = null
+    )
     {
         var opts = new SessionOptions();
         if (useGpu)
@@ -847,7 +864,7 @@ public static class Helper
         }
         else
         {
-            Console.WriteLine("Using CPU for inference");
+            logger?.LogInformation("Using CPU for inference");
         }
 
         var cfgs = LoadCfgs(onnxDir);
@@ -930,13 +947,13 @@ public static class Helper
     // Timer utility
     // ============================================================================
 
-    public static T Timer<T>(string name, Func<T> func)
+    public static T Timer<T>(string name, Func<T> func, ILogger? logger = null)
     {
         var start = DateTime.Now;
-        Console.WriteLine($"{name}...");
+        logger?.LogInformation("{Name}...", name);
         var result = func();
         var elapsed = (DateTime.Now - start).TotalSeconds;
-        Console.WriteLine($"  -> {name} completed in {elapsed:F2} sec");
+        logger?.LogInformation("  -> {Name} completed in {Elapsed:F2} sec", name, elapsed);
         return result;
     }
 
